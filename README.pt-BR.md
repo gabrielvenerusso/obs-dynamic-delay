@@ -51,6 +51,7 @@ O "Stream Delay" que já vem no OBS só pode ser mudado com a live parada. Com o
 - **Todo recurso pode ser desligado de verdade**, não só escondido: um recurso desligado não faz nada.
 - **O celular vira um Stream Deck:** uma grade de botões que você monta (delay, apagar, replay, clipe, pânico, cenas do OBS, mutar fontes de áudio, iniciar/parar transmissão e gravação), acesos com o estado ao vivo. Abre por QR code.
 - **Atalhos** do OBS, **plugin do Stream Deck** e **comandos no chat da Twitch** para você e seus mods.
+- **Widget na tela:** um selo minimalista que mostra para quem assiste que o delay está ligado e de quantos segundos, com estilo, tema, textos, cor e tamanho à escolha. Um clique adiciona no OBS.
 - **Saúde da live:** bitrate vindo do OBS, estado de cada destino e um apito quando uma conexão cai.
 - **Português e inglês** em tudo.
 
@@ -216,6 +217,28 @@ O celular (ou um tablet, ou um segundo monitor) vira um Stream Deck: uma grade d
 
 Os botões vibram ao tocar e tremem se algo deu errado. O link leva o token de acesso: quem tiver ele controla a sua live, então não compartilhe. No PC, "Abrir o deck neste PC" abre o mesmo deck no navegador.
 
+### Widget na tela
+
+Um selo discreto na live que mostra para quem assiste que o delay está ligado, e de quantos segundos. Minimalista por padrão, e cada parte pode ser mudada.
+
+![Visuais do widget na tela](docs/img/pt/overlay.png)
+
+1. Ligue **Widget na tela** em **Recursos e painel** (vem ligado) e abra o bloco dele.
+2. Clique em **Adicionar na cena atual do OBS**: o script cria uma fonte de navegador chamada "Dynamic Delay overlay" no canto superior esquerdo. Mova e redimensione como qualquer fonte. Ou copie o link (`http://127.0.0.1:8787/overlay`) numa fonte de navegador você mesmo.
+3. Personalize no mesmo bloco, com prévia ao vivo (os botões embaixo da prévia mostram cada estado):
+
+| Opção | Escolhas |
+|---|---|
+| Estilo | pílula, cartão (segundos grandes), só texto |
+| Tema | escuro, claro, contorno |
+| Mostrar | ponto, texto, segundos, linha de progresso (cada um liga/desliga) |
+| Textos | suas palavras para ativo, ajustando, replay e desligado (vazio = padrão) |
+| Também | cor, tamanho (50 a 300%), alinhamento, fonte (sans, mono, condensada), tempo como `30s` ou `0:30`, esconder enquanto o delay está desligado |
+
+Estados: **Delay** (ponto vermelho) enquanto o público está atrasado, **Ajustando** (âmbar, com a linha de progresso) enquanto o delay enche ou volta para o ao vivo, **Replay** (azul) durante um replay instantâneo. Some quando você não está ao vivo, e enquanto o delay está desligado, a menos que você desmarque essa opção.
+
+As mudanças aparecem na live na hora. Para um segundo visual em outra cena, adicione parâmetros no link, com os mesmos nomes das opções: `?style=minimal&scale=150&show_label=0&accent=22c55e`. O campo CSS personalizado da fonte de navegador também funciona. A página é só leitura e não precisa do token: ela só mostra o estado do delay.
+
 ## Atalhos
 
 Em **Configurações > Atalhos**, procure "Delay dinâmico":
@@ -307,6 +330,8 @@ OBS ──RTMP──▶ 127.0.0.1:1935 ──▶ motor de delay ──▶ um cli
 | `/api/obs/fps/{n}` | pede ao script do OBS para mudar o FPS do OBS (24, 25, 30, 48, 50 ou 60) |
 | `/api/lan` | link e QR code do deck no celular |
 | `/deck` · `/api/deck/press/{n}` | página do deck · executa o botão número n |
+| `/api/obs/overlay` | pede ao script do OBS para adicionar o widget na cena atual |
+| `/overlay` · `/overlay/state` | página do widget na tela e o estado dele (sem token: só leitura, só o estado do delay) |
 
 A porta UDP `8788` aceita os mesmos comandos em texto (`toggle`, `set 30`, `censor`...) e os que o script do OBS usa.
 
@@ -335,6 +360,7 @@ Rodar só o relay: `obs-dynamic-delay.exe caminho\config.toml`. Testar o instala
 | `src/i18n.rs` | textos em inglês e português (macro `t!`) |
 | `src/panel.html` | painel; cada bloco é uma entrada em `MODULES`, textos em `TEXT` |
 | `src/deck.html` | deck no celular |
+| `src/overlay.html` | widget na tela (fonte de navegador) |
 | `obs/obs-dynamic-delay.lua` | script do OBS (textos pela função `L()`) |
 | `streamdeck/` | plugin do Stream Deck e o gerador dos ícones |
 

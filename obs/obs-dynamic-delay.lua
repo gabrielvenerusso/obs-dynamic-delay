@@ -586,6 +586,40 @@ local function video_info()
 end
 
 -- Clips copy the stream, so their frame rate is the OBS frame rate (Settings > Video).
+-- On-screen widget: a Browser Source showing the relay's /overlay page.
+local OVERLAY_NAME = "Dynamic Delay overlay"
+local function add_overlay(url)
+  local scene_src = obs.obs_frontend_get_current_scene()
+  if scene_src == nil then return end
+  local scene = obs.obs_scene_from_source(scene_src)
+  local src = obs.obs_get_source_by_name(OVERLAY_NAME)
+  if src == nil then
+    local st = obs.obs_data_create()
+    obs.obs_data_set_string(st, "url", url)
+    obs.obs_data_set_int(st, "width", 640)
+    obs.obs_data_set_int(st, "height", 160)
+    src = obs.obs_source_create("browser_source", OVERLAY_NAME, st, nil)
+    obs.obs_data_release(st)
+  else
+    local st = obs.obs_source_get_settings(src)
+    obs.obs_data_set_string(st, "url", url)
+    obs.obs_source_update(src, st)
+    obs.obs_data_release(st)
+  end
+  if src ~= nil then
+    local item = obs.obs_scene_find_source(scene, OVERLAY_NAME)
+    if item == nil then
+      item = obs.obs_scene_add(scene, src)
+      local pos = obs.vec2()
+      pos.x, pos.y = 24, 24
+      obs.obs_sceneitem_set_pos(item, pos)
+    end
+    obs.obs_sceneitem_set_visible(item, true)
+    obs.obs_source_release(src)
+  end
+  obs.obs_source_release(scene_src)
+end
+
 local function set_fps(n)
   local busy = obs.obs_frontend_streaming_active() or obs.obs_frontend_recording_active()
   pcall(function() busy = busy or obs.obs_frontend_replay_buffer_active() or obs.obs_frontend_virtualcam_active() end)
@@ -657,7 +691,8 @@ local function poll_tick()
     elseif reply:sub(1, 5) == "mute\t" then deck_mute(reply:sub(6)); send_obs_state(true)
     elseif reply == "stream_toggle" then deck_stream()
     elseif reply == "record_toggle" then deck_record()
-    elseif reply:sub(1, 4) == "fps\t" then set_fps(tonumber(reply:sub(5)) or 60); send_obs_state(true) end
+    elseif reply:sub(1, 4) == "fps\t" then set_fps(tonumber(reply:sub(5)) or 60); send_obs_state(true)
+    elseif reply:sub(1, 8) == "overlay\t" then add_overlay(reply:sub(9)) end
     reply = recv_on(poll_sock, 1)
   end
   send_on(poll_sock, "poll " .. (obs_configured() and "1" or "0"))

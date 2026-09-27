@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dynamic Delay overlay</title>
+<!--
+  On-screen widget for an OBS Browser Source. The look comes from the panel
+  (Overlay block); any setting can be overridden per source in the URL, e.g.
+  /overlay?style=minimal&scale=150&show_label=0
+  Preview only: preview=1 shows sample values while offline, demo=on|adjusting|off|replay forces a state.
+-->
+<style>
+  :root { --fg: #f2f2f3; --bg: rgba(14, 14, 16, .86); --line: rgba(255, 255, 255, .09); --muted: rgba(242, 242, 243, .62);
+    --accent: #e5484d; --amber: #f5a524; --blue: #3b9eff; --grey: #8b8d98; --dot: var(--accent); }
+  html, body { margin: 0; background: transparent; overflow: hidden; }
+  body { display: flex; justify-content: flex-start; padding: .5rem; box-sizing: border-box; min-height: 100vh; align-items: flex-start;
+    font-family: "Inter", "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+  body.center { justify-content: center; }
+  body.right { justify-content: flex-end; }
+  body.mono { font-family: "JetBrains Mono", "Cascadia Mono", Consolas, monospace; }
+  body.condensed { font-family: "Bahnschrift", "DIN Alternate", "Roboto Condensed", "Arial Narrow", sans-serif; font-stretch: 87.5%; }
+
+  .w { --dot: var(--accent); position: relative; display: inline-flex; align-items: center; gap: .5rem; color: var(--fg); line-height: 1; white-space: nowrap;
+    transition: opacity .22s ease-out, transform .22s ease-out; }
+  .w.hidden { opacity: 0; transform: translateY(.25rem); transition-timing-function: ease-in; transition-duration: .15s; }
+  .dot { width: .5rem; height: .5rem; border-radius: 50%; background: var(--dot); flex: none; transition: background .2s; }
+  .label { font-weight: 700; font-size: .8125rem; letter-spacing: .08em; text-transform: uppercase; }
+  .secs { font-weight: 600; font-size: .9375rem; font-variant-numeric: tabular-nums; letter-spacing: .01em; }
+  .label + .secs { opacity: .78; }
+  .bar { position: absolute; left: 0; right: 0; bottom: 0; height: 2px; overflow: hidden; opacity: 0; transition: opacity .2s; }
+  .bar i { display: block; height: 100%; background: var(--dot); transform-origin: left; transform: scaleX(0); transition: transform .5s linear, background .2s; }
+  .w.progress .bar { opacity: 1; }
+  .w[data-state="adjusting"] { --dot: var(--amber); }
+  .w[data-state="adjusting"] .dot { animation: pulse 1.2s ease-in-out infinite; }
+  .w[data-state="replay"] { --dot: var(--blue); }
+  .w[data-state="off"] { --dot: var(--grey); }
+  @keyframes pulse { 50% { opacity: .35; } }
+
+  /* boxed looks */
+  .pill, .card { background: var(--bg); box-shadow: inset 0 0 0 1px var(--line); overflow: hidden; }
+  .pill { height: 2.25rem; padding: 0 .875rem; border-radius: 1.125rem; }
+  .pill .bar { left: .875rem; right: .875rem; bottom: .3125rem; border-radius: 1px; background: var(--line); }
+  .card { display: inline-grid; grid-template-columns: auto 1fr; grid-template-areas: "dot label" "secs secs"; row-gap: .5rem; column-gap: .5rem;
+    padding: .75rem 1rem 1rem; border-radius: .625rem; min-width: 7.5rem; }
+  .card .dot { grid-area: dot; }
+  .card .label { grid-area: label; font-size: .6875rem; color: var(--muted); }
+  .card .secs { grid-area: secs; font-size: 1.75rem; font-weight: 650; opacity: 1; }
+  .card .bar { height: 3px; background: var(--line); opacity: 1; }
+  .card:not(.progress) .bar { opacity: 0; }
+  .card.nolabel { grid-template-areas: "dot secs"; align-items: center; }
+
+  /* themes */
+  .light { --fg: #111113; --bg: rgba(250, 250, 251, .94); --line: rgba(0, 0, 0, .09); --muted: rgba(17, 17, 19, .6); }
+  .outline { --bg: transparent; --line: rgba(255, 255, 255, .9); --muted: rgba(255, 255, 255, .75); --fg: #fff; text-shadow: 0 1px 2px rgba(0, 0, 0, .55); }
+  .outline.pill, .outline.card { box-shadow: inset 0 0 0 2px var(--line), 0 1px 3px rgba(0, 0, 0, .35); }
+  .minimal { --fg: #fff; --line: rgba(255, 255, 255, .25); --muted: rgba(255, 255, 255, .8); text-shadow: 0 1px 2px rgba(0, 0, 0, .7), 0 0 8px rgba(0, 0, 0, .35); padding-bottom: .375rem; }
+  .minimal .dot { box-shadow: 0 0 0 1px rgba(0, 0, 0, .25); }
+  .minimal .bar { background: var(--line); }
+</style>
+</head>
+<body>
+<div class="w pill dark hidden" id="w" role="status" aria-live="polite">
+  <span class="dot" id="dot"></span><span class="label" id="label"></span><span class="secs" id="secs"></span><span class="bar"><i id="fill"></i></span>
+</div>
+<script>
+"use strict";
+const TEXT = {
+  en: { on: "Delay", off: "No delay", adjusting: "Adjusting", replay: "Replay" },
+  pt: { on: "Delay", off: "Sem delay", adjusting: "Ajustando", replay: "Replay" },
+};
+const q = new URLSearchParams(location.search);
+const preview = q.get("preview") === "1";
+const demo = q.get("demo");
+const $ = (id) => document.getElementById(id);
+const w = $("w");
+let last = null, failedAt = 0;
+
+// panel settings, overridden by URL parameters of the same name
+function look(base) {
+  const l = Object.assign({}, base);
+  for (const [k, v] of q) {
+    if (!(k in l)) continue;
+    if (typeof l[k] === "boolean") l[k] = v === "1" || v === "true";
+    else if (typeof l[k] === "number") l[k] = Number(v) || l[k];
+    else l[k] = k === "accent" && /^[0-9a-f]{6}$/i.test(v) ? "#" + v : v;
+  }
+  return l;
+}
+function clock(s) { return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; }
+
+function render(st) {
+  if (!st || !st.on) { w.classList.add("hidden"); return; }
+  const L = look(st.look);
+  const T = TEXT[st.lang] || TEXT.en;
+  // what the viewers get right now
+  let state, secs = st.delay_seconds, progress = 0;
+  if (demo) state = demo;
+  else if (!st.live) state = preview ? "on" : "idle"; // sample while offline
+  else if (st.replaying) state = "replay";
+  else if (!st.enabled && st.current_ms < 500) state = "off";
+  else if (["growing", "filling", "shrinking"].includes(st.phase) || (!st.enabled && st.current_ms >= 500)) state = "adjusting";
+  else state = st.phase === "live" ? "off" : "on";
+  if (st.live && !demo) {
+    const cur = st.current_ms / 1000;
+    secs = state === "on" ? st.delay_seconds : Math.round(cur);
+    const top = Math.max(st.target_ms, st.current_ms, 1);
+    progress = st.current_ms / top;
+  } else if (state === "adjusting") { secs = Math.round(st.delay_seconds * .6); progress = .6; }
+  else if (state === "on") progress = 1;
+  const hidden = state === "idle" || (state === "off" && L.hide_when_off && !demo);
+
+  document.documentElement.style.fontSize = (16 * Math.min(300, Math.max(50, L.scale))) / 100 + "px";
+  document.body.className = [L.align, L.font].join(" ");
+  document.documentElement.style.setProperty("--accent", L.accent);
+  const custom = { on: L.label_on, off: L.label_off, adjusting: L.label_adjusting, replay: L.label_replay };
+  $("label").textContent = custom[state] || T[state] || T.on;
+  $("secs").textContent = state === "off" ? "" : L.time_format === "clock" ? clock(secs) : `${secs}s`;
+  $("dot").hidden = !L.show_dot;
+  $("label").hidden = !L.show_label;
+  $("secs").hidden = !L.show_seconds || state === "off";
+  const boxed = L.style !== "minimal";
+  const showBar = L.show_progress && (state === "adjusting" || (L.style === "card" && state === "on"));
+  w.className = ["w", L.style, boxed ? L.theme : "", showBar ? "progress" : "", L.show_label ? "" : "nolabel", hidden ? "hidden" : ""].join(" ");
+  w.dataset.state = state;
+  $("fill").style.transform = `scaleX(${Math.max(0, Math.min(1, progress))})`;
+}
+
+async function poll() {
+  try {
+    const r = await fetch("/overlay/state", { cache: "no-store" });
+    last = await r.json();
+    failedAt = 0;
+  } catch {
+    // relay closed: keep the last look for a moment, then hide
+    failedAt = failedAt || Date.now();
+    if (Date.now() - failedAt > 5000) last = null;
+  }
+  render(last);
+}
+poll();
+setInterval(poll, 500);
+</script>
+</body>
+</html>

@@ -52,6 +52,8 @@ pub enum ObsAction {
     ToggleRecord,
     /// Sets the OBS frame rate (Settings > Video > Common FPS values).
     SetFps(u32),
+    /// Adds the on-screen widget (Browser Source with this URL) to the current scene.
+    AddOverlay(String),
 }
 
 impl ObsAction {
@@ -69,6 +71,7 @@ impl ObsAction {
             ObsAction::ToggleStream => "stream_toggle".into(),
             ObsAction::ToggleRecord => "record_toggle".into(),
             ObsAction::SetFps(n) => format!("fps\t{n}"),
+            ObsAction::AddOverlay(url) => format!("overlay\t{url}"),
         }
     }
 }

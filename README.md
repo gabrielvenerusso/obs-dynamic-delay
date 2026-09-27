@@ -51,6 +51,7 @@ OBS' built-in "Stream Delay" can only be changed while the stream is stopped. Wi
 - **Every feature can be switched off for real**, not just hidden: an off feature does no work at all.
 - **Your phone becomes a Stream Deck:** a grid of keys you design (delay, delete, replay, clip, panic, OBS scenes, mute audio sources, start/stop streaming and recording), lit with the live state. Open it with a QR code.
 - OBS **hotkeys**, a **Stream Deck plugin** and **Twitch chat commands** for you and your mods.
+- **On-screen widget:** a minimal badge that shows viewers the delay is on and how many seconds, with style, theme, texts, color and size to choose. One click adds it to OBS.
 - **Stream health:** input bitrate, per destination status, and a beep when a connection drops.
 - **English and Portuguese** everywhere.
 
@@ -216,6 +217,28 @@ Your phone (or a tablet, or a second monitor) becomes a Stream Deck: a full-scre
 
 Keys vibrate when pressed and shake if something failed. The link carries the access token: anyone with it can control your stream, so do not share it. On the PC, "Open the deck on this PC" opens the same deck in the browser.
 
+### On-screen widget
+
+A small badge on your stream that tells viewers the delay is on, and how many seconds. Minimal by default, and every part of it can be changed.
+
+![On-screen widget looks](docs/img/en/overlay.png)
+
+1. Turn **On-screen widget** on under **Features and panel** (on by default) and open its block.
+2. Press **Add to the current OBS scene**: the OBS script creates a Browser Source named "Dynamic Delay overlay" at the top left. Move and resize it like any source. Or copy the link (`http://127.0.0.1:8787/overlay`) into a Browser Source yourself.
+3. Customize it in the same block, with a live preview (the buttons under the preview show each state):
+
+| Setting | Options |
+|---|---|
+| Style | pill, card (big seconds), text only |
+| Theme | dark, light, outline |
+| Show | dot, text, seconds, progress line (each one on/off) |
+| Texts | your own words for on, adjusting, replay and off (empty = default) |
+| Also | color, size (50 to 300%), alignment, font (sans, mono, condensed), time as `30s` or `0:30`, hide while the delay is off |
+
+States: **Delay** (red dot) while viewers are behind, **Adjusting** (amber, with the progress line) while the delay builds up or goes back to live, **Replay** (blue) during an instant replay. It hides when you are not live, and while the delay is off unless you turn that off.
+
+Changes apply on stream right away. For a second look in another scene, add URL parameters to the link, with the same names as the settings: `?style=minimal&scale=150&show_label=0&accent=22c55e`. The Browser Source's Custom CSS field works too. The page is read-only and needs no token: it only shows the delay state.
+
 ## Hotkeys
 
 In **Settings > Hotkeys**, look for "Dynamic Delay":
@@ -266,7 +289,7 @@ The relay checks GitHub for a new version when it starts, every 6 hours and when
 ## Security
 
 - Every API call needs the access token created on first start (`api_token` in `config.toml`). Websites open in your browser cannot control the delay or read your settings.
-- The API never returns stream keys or the token.
+- The API never returns stream keys or the token. The on-screen widget page (`/overlay`) is the only thing without the token: it is read-only and shows the delay state and nothing else.
 - By default the panel only listens on your PC (`127.0.0.1`). The **phone deck** (off by default) opens it to your local network, still protected by the token. A deck key only runs the action saved for it in the editor.
 - Features you switch off do nothing: no chat connection, no LAN port, no extra buffers.
 - The relay only ever opens three fixed places on your PC when asked (the author's GitHub, the releases page, the clips folder).
@@ -307,6 +330,8 @@ OBS ──RTMP──▶ 127.0.0.1:1935 ──▶ delay engine ──▶ one RTMP
 | `/api/obs/fps/{n}` | asks the OBS script to set the OBS frame rate (24, 25, 30, 48, 50 or 60) |
 | `/api/lan` | phone deck link and QR code |
 | `/deck` · `/api/deck/press/{n}` | phone deck page · runs key number n |
+| `/api/obs/overlay` | asks the OBS script to add the on-screen widget to the current scene |
+| `/overlay` · `/overlay/state` | on-screen widget page and its state (no token: read-only, delay state only) |
 
 UDP port `8788` takes the same commands as text (`toggle`, `set 30`, `censor`, ...) plus the ones used by the OBS script.
 
@@ -335,6 +360,7 @@ Run only the relay: `obs-dynamic-delay.exe path\config.toml`. Test the installer
 | `src/i18n.rs` | English and Portuguese texts (`t!` macro) |
 | `src/panel.html` | panel; each block is an entry in `MODULES`, texts in `TEXT` |
 | `src/deck.html` | phone deck |
+| `src/overlay.html` | on-screen widget (Browser Source) |
 | `obs/obs-dynamic-delay.lua` | OBS script (texts through `L()`) |
 | `streamdeck/` | Stream Deck plugin and its icon generator |
 

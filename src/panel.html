@@ -162,6 +162,13 @@
   .items:empty { display: none; }
   .item { display: grid; gap: 8px; padding: 10px; border-radius: var(--r-md); background: var(--surface-2); border: 1px solid var(--border); }
   .item-row { display: flex; align-items: center; gap: 6px; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 10px; }
+  .ov-preview { height: 96px; border-radius: var(--r-md); border: 1px solid var(--border); overflow: hidden;
+    background: repeating-conic-gradient(#1b1c20 0% 25%, #141518 0% 50%) 0 0 / 16px 16px; }
+  /* same color scheme as the page inside, or Chrome paints the frame white */
+  .ov-preview iframe { width: 100%; height: 100%; border: 0; display: block; color-scheme: light; }
+  input[type=range] { width: 100%; accent-color: var(--accent); }
+  input[type=color] { height: 34px; padding: 3px; cursor: pointer; }
   .item-row > .grow { flex: 1; min-width: 0; }
   .index { width: 22px; height: 22px; border-radius: 6px; display: grid; place-items: center; flex: none; font-size: 11px; font-weight: 700;
     background: var(--surface-3); color: var(--text-2); font-variant-numeric: tabular-nums; }
@@ -277,15 +284,24 @@ const TEXT = {
     m: {
       delay: "Delay", censor: "Delete before it airs", replay: "Instant replay", clips: "Clips", panic: "Panic button", health: "Stream health",
       multistream: "Multistream", rules: "Delay by scene", chat: "Twitch chat commands", phone: "Phone deck", streamdeck: "Stream Deck / API",
-      outage: "Connection drop protection", update_check: "Update notice",
+      overlay: "On-screen widget", outage: "Connection drop protection", update_check: "Update notice",
     },
     mDesc: {
       delay: "turn the delay on/off, presets", censor: "remove the last seconds before viewers see them", replay: "replay the last seconds on air",
       clips: "save the last seconds as MP4", panic: "cover the stream and mute everything", health: "bitrate, connections, alerts",
       multistream: "stream to several platforms at once", rules: "delay switches with the OBS scene", chat: "!delay commands for mods",
       phone: "your phone becomes a Stream Deck: delay, scenes, audio, stream", streamdeck: "button links for Stream Deck and bots",
+      overlay: "shows viewers that the delay is on, and how many seconds",
       outage: "resend what was missed when a platform connection drops", update_check: "checks GitHub for new versions",
     },
+    ovAdd: "Add to the current OBS scene", ovLink: "Browser Source link", ovPreview: "Preview", ovReal: "Now",
+    ovStates: { on: "On", adjusting: "Adjusting", replay: "Replay", off: "Off" },
+    ovStyle: "Style", ovStyles: { pill: "Pill", card: "Card", minimal: "Text only" }, ovTheme: "Theme", ovThemes: { dark: "Dark", light: "Light", outline: "Outline" },
+    ovShow: "Show", ovDot: "Dot", ovLabel: "Text", ovSecs: "Seconds", ovProgress: "Progress line",
+    ovHide: "Hide while the delay is off", ovSize: "Size", ovAlign: "Alignment", ovAligns: { left: "Left", center: "Center", right: "Right" },
+    ovFont: "Font", ovFonts: { sans: "Sans", mono: "Mono", condensed: "Condensed" }, ovFormat: "Time", ovColor: "Color",
+    ovTexts: "Texts (empty = default)", ovDefaults: { on: "Delay", adjusting: "Adjusting", replay: "Replay", off: "No delay" },
+    ovHint: "The widget is an OBS Browser Source: move and resize it like any source. Changes here show up on stream right away. For a second look, add URL parameters to its link (for example ?style=minimal&scale=150) or use the Custom CSS field of the source.",
     seconds: "Seconds", censorBtn: (s) => `Delete the last ${s}s`, censorHint: "Only works with the delay on: the part viewers have not seen yet is removed and the stream holds its last frame over the gap.",
     replayBtn: (s) => `Replay the last ${s}s`, replayHint: "Viewers see the last seconds again, then the stream returns to the normal delay.",
     clipSource: "Clips come out at", clipSame: "same size and FPS as the stream: clips copy it frame by frame", clipUnknown: "known once OBS is open",
@@ -349,16 +365,24 @@ const TEXT = {
     overLimit: (k, p, m) => `O OBS está mandando ${k} kbps, acima do limite da ${p} de ${m} kbps, e o público pode cair para 720p. Pare e inicie a live: o script do OBS ajusta o encoder às regras da ${p}.`,
     m: {
       delay: "Delay", censor: "Apagar antes de ir ao ar", replay: "Replay instantâneo", clips: "Clipes", panic: "Botão de pânico", health: "Saúde da live",
-      multistream: "Multistream", rules: "Delay por cena", chat: "Comandos no chat da Twitch", phone: "Deck no celular", streamdeck: "Stream Deck / API",
+      multistream: "Multistream", rules: "Delay por cena", chat: "Comandos no chat da Twitch", phone: "Deck no celular", streamdeck: "Stream Deck / API", overlay: "Widget na tela",
       outage: "Proteção contra queda de conexão", update_check: "Aviso de atualização",
     },
     mDesc: {
       delay: "ligar/desligar o delay, presets", censor: "tirar os últimos segundos antes do público ver", replay: "repetir os últimos segundos no ar",
       clips: "salvar os últimos segundos em MP4", panic: "cobrir a live e mutar tudo", health: "bitrate, conexões, alertas",
       multistream: "transmitir para várias plataformas ao mesmo tempo", rules: "o delay muda sozinho com a cena do OBS", chat: "comandos !delay para os mods",
-      phone: "o celular vira um Stream Deck: delay, cenas, áudio, transmissão", streamdeck: "links de botão para Stream Deck e bots",
+      phone: "o celular vira um Stream Deck: delay, cenas, áudio, transmissão", streamdeck: "links de botão para Stream Deck e bots", overlay: "mostra para quem assiste que o delay está ligado, e de quantos segundos",
       outage: "reenviar o que foi perdido quando a conexão com uma plataforma cai", update_check: "consulta o GitHub por versões novas",
     },
+    ovAdd: "Adicionar na cena atual do OBS", ovLink: "Link da fonte de navegador", ovPreview: "Prévia", ovReal: "Agora",
+    ovStates: { on: "Ativo", adjusting: "Ajustando", replay: "Replay", off: "Desligado" },
+    ovStyle: "Estilo", ovStyles: { pill: "Pílula", card: "Cartão", minimal: "Só texto" }, ovTheme: "Tema", ovThemes: { dark: "Escuro", light: "Claro", outline: "Contorno" },
+    ovShow: "Mostrar", ovDot: "Ponto", ovLabel: "Texto", ovSecs: "Segundos", ovProgress: "Linha de progresso",
+    ovHide: "Esconder enquanto o delay está desligado", ovSize: "Tamanho", ovAlign: "Alinhamento", ovAligns: { left: "Esquerda", center: "Centro", right: "Direita" },
+    ovFont: "Fonte", ovFonts: { sans: "Sans", mono: "Mono", condensed: "Condensada" }, ovFormat: "Tempo", ovColor: "Cor",
+    ovTexts: "Textos (vazio = padrão)", ovDefaults: { on: "Delay", adjusting: "Ajustando", replay: "Replay", off: "Sem delay" },
+    ovHint: "O widget é uma fonte de navegador do OBS: mova e redimensione como qualquer fonte. O que você muda aqui aparece na live na hora. Para um segundo visual, adicione parâmetros no link (por exemplo ?style=minimal&scale=150) ou use o campo CSS personalizado da fonte.",
     seconds: "Segundos", censorBtn: (s) => `Apagar os últimos ${s}s`, censorHint: "Só funciona com o delay ligado: o trecho que o público ainda não viu é removido e a live segura o último quadro no lugar.",
     replayBtn: (s) => `Replay dos últimos ${s}s`, replayHint: "O público vê os últimos segundos de novo e depois a live volta ao delay normal.",
     clipSource: "Os clipes saem em", clipSame: "mesmo tamanho e FPS da live: o clipe copia quadro a quadro", clipUnknown: "aparece quando o OBS estiver aberto",
@@ -406,9 +430,9 @@ const TEXT = {
     up: "Subir", down: "Descer", obsStreaming: "OBS transmitindo", scriptMissing: "script do OBS não está rodando", obsReady: "OBS pronto", obsNotConfigured: "OBS não configurado",
   },
 };
-const ALL_MODULES = ["delay", "censor", "replay", "clips", "panic", "health", "multistream", "rules", "chat", "phone", "streamdeck"];
+const ALL_MODULES = ["delay", "censor", "replay", "clips", "panic", "health", "multistream", "rules", "chat", "phone", "streamdeck", "overlay"];
 // Blocks backed by a feature switch (config "features"); the others are always on.
-const FEATURE_OF = { censor: "censor", replay: "replay", clips: "clips", panic: "panic", multistream: "multistream", rules: "rules", chat: "chat", phone: "phone" };
+const FEATURE_OF = { censor: "censor", replay: "replay", clips: "clips", panic: "panic", multistream: "multistream", rules: "rules", chat: "chat", phone: "phone", overlay: "overlay" };
 // Features without a block of their own.
 const EXTRA_FEATURES = ["outage", "update_check"];
 const DECK_ACTIONS = ["delay.toggle", "delay.on", "delay.off", "delay.set", "delay.add", "censor", "replay", "clip", "panic", "catchup",
@@ -454,6 +478,7 @@ const ICON = {
   sparkles: '<path d="M252,152a12,12,0,0,1-12,12H228v12a12,12,0,0,1-24,0V164H192a12,12,0,0,1,0-24h12V128a12,12,0,0,1,24,0v12h12A12,12,0,0,1,252,152ZM56,76H68V88a12,12,0,0,0,24,0V76h12a12,12,0,1,0,0-24H92V40a12,12,0,0,0-24,0V52H56a12,12,0,0,0,0,24ZM184,188h-4v-4a12,12,0,0,0-24,0v4h-4a12,12,0,0,0,0,24h4v4a12,12,0,0,0,24,0v-4h4a12,12,0,0,0,0-24ZM222.14,82.83,82.82,222.14a20,20,0,0,1-28.28,0L33.85,201.46a20,20,0,0,1,0-28.29L173.17,33.86a20,20,0,0,1,28.28,0l20.69,20.68A20,20,0,0,1,222.14,82.83ZM159,112,144,97,53.65,187.31l15,15Zm43.31-43.31-15-15L161,80l15,15Z"/>',
   plug: '<path d="M137,168l11.52-11.51a12,12,0,0,0-17-17L120,151l-15-15,11.52-11.51a12,12,0,0,0-17-17L88,119,72.49,103.51a12,12,0,0,0-17,17L59,124,38.54,144.49a36,36,0,0,0,0,50.91l2.55,2.54L15.51,223.51a12,12,0,0,0,17,17l25.57-25.58,2.54,2.55a36.06,36.06,0,0,0,50.91,0L132,197l3.51,3.52a12,12,0,0,0,17-17ZM94.54,200.49a12,12,0,0,1-17,0L55.51,178.43a12,12,0,0,1,0-17L76,141l39,39Zm146-185a12,12,0,0,0-17,0L197.94,41.09l-2.54-2.55a36.05,36.05,0,0,0-50.91,0L124,59l-3.51-3.52a12,12,0,0,0-17,17l80,80a12,12,0,0,0,17-17L197,132l20.49-20.49a36,36,0,0,0,0-50.91l-2.55-2.54,25.58-25.57A12,12,0,0,0,240.49,15.51Zm-40,79L180,115,141,76l20.49-20.49a12,12,0,0,1,17,0l22.06,22.06a12,12,0,0,1,0,17Z"/>',
   fastforward: '<path d="M246.81,111.29,158.63,55.12A19.91,19.91,0,0,0,128,71.84v30L54.63,55.12A19.91,19.91,0,0,0,24,71.84V184.16a19.93,19.93,0,0,0,30.63,16.72L128,154.15v30a19.93,19.93,0,0,0,30.63,16.72l88.18-56.17a19.79,19.79,0,0,0,0-33.42ZM48,176.64V79.36L124.38,128Zm104,0V79.36L228.38,128Z"/>',
+  overlay: '<path d="M216,44H40A20,20,0,0,0,20,64V192a20,20,0,0,0,20,20H216a20,20,0,0,0,20-20V64A20,20,0,0,0,216,44ZM44,68H212v48H136a12,12,0,0,0-12,12v60H44ZM148,188V140h64v48Z"/>',
   zap: '<path d="M219.71,117.38a12,12,0,0,0-7.25-8.52L161.28,88.39l10.59-70.61a12,12,0,0,0-20.64-10l-112,120a12,12,0,0,0,4.31,19.33l51.18,20.47L84.13,238.22a12,12,0,0,0,20.64,10l112-120A12,12,0,0,0,219.71,117.38ZM113.6,203.55l6.27-41.77a12,12,0,0,0-7.41-12.92L68.74,131.37,142.4,52.45l-6.27,41.77a12,12,0,0,0,7.41,12.92l43.72,17.49Z"/>',
 };
 function icon(name, cls) {
@@ -468,7 +493,7 @@ function icon(name, cls) {
 const LOOK = {
   delay: ["timer", "amber"], censor: ["scissors", "red"], replay: ["replay", "blue"], clips: ["clapper", "blue"], panic: ["siren", "red"],
   health: ["activity", "green"], multistream: ["tower", "violet"], rules: ["layers", "amber"], chat: ["chat", "violet"], phone: ["phone", "blue"],
-  streamdeck: ["grid", "grey"], settings: ["settings", "grey"], customize: ["sliders", "grey"],
+  streamdeck: ["grid", "grey"], overlay: ["overlay", "grey"], settings: ["settings", "grey"], customize: ["sliders", "grey"],
 };
 const LOGO_SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256"> <rect width="256" height="256" rx="56" fill="#17181c"/> <path d="M62 84 Q62 70 74 77 L140 116 Q151 128 140 140 L74 179 Q62 186 62 172 Z" fill="#f2f2f3" fill-opacity=".3"/> <path d="M102 84 Q102 70 114 77 L180 116 Q191 128 180 140 L114 179 Q102 186 102 172 Z" fill="#f2f2f3" stroke="#17181c" stroke-width="16" stroke-linejoin="round" paint-order="stroke"/> <circle cx="196" cy="60" r="15" fill="#e5484d"/></svg>';
 const badge = (look) => h("span", { class: "ico tone-" + LOOK[look][1] }, icon(LOOK[look][0]));
@@ -879,6 +904,52 @@ const MODULES = {
         h("div", { class: "link-row" }, icon("key"), h("b", { class: "grow", text: T().token }), copyButton(() => TOKEN)),
         hint(T().sdHint),
         h("div", { class: "rows" }, ...rows.map(([label, c]) => h("div", { class: "link-row" }, h("span", { class: "grow", text: label }), copyButton(() => `${base}${c}?token=${TOKEN}`))))];
+    },
+    update() {},
+  },
+  overlay: {
+    build() {
+      const o = () => cfg.overlay;
+      const base = API || location.origin;
+      // saved without rebuilding the panel, so the preview keeps running
+      const set = (patch) => {
+        cfg.overlay = Object.assign({}, o(), patch);
+        api("/api/config", { body: { overlay: cfg.overlay } }).then((r) => { if (!r.ok) toast(r.error, "error"); });
+      };
+      const select = (key, names) => {
+        const sel = h("select", { onchange: (e) => set({ [key]: e.target.value }) }, ...Object.entries(names).map(([v, t]) => h("option", { value: v, text: t })));
+        sel.value = o()[key];
+        return sel;
+      };
+      const frame = h("iframe", { title: T().ovPreview, src: base + "/overlay?preview=1", tabindex: "-1" });
+      const demos = ["", "on", "adjusting", "replay", "off"].map((d) => {
+        const b = h("button", { class: "btn", type: "button", text: d ? T().ovStates[d] : T().ovReal, "aria-pressed": String(!d), onclick: () => {
+          frame.src = base + "/overlay?preview=1" + (d ? "&demo=" + d : "");
+          for (const x of demos) x.setAttribute("aria-pressed", String(x === b));
+        } });
+        return b;
+      });
+      const size = h("output", { class: "dim", text: o().scale + "%" });
+      const scale = h("input", { type: "range", min: 50, max: 300, step: 10, value: o().scale, "aria-label": T().ovSize,
+        oninput: (e) => (size.textContent = e.target.value + "%"), onchange: (e) => set({ scale: parseInt(e.target.value) }) });
+      const color = h("input", { type: "color", value: o().accent, "aria-label": T().ovColor, onchange: (e) => set({ accent: e.target.value }) });
+      const text = (key, state) => h("input", { type: "text", maxlength: 24, value: o()[key], placeholder: T().ovDefaults[state], "aria-label": T().ovStates[state],
+        onchange: (e) => set({ [key]: e.target.value.trim() }) });
+      const flag = (key, label) => check(o()[key], label, (e) => set({ [key]: e.target.checked }));
+      return [h("div", { class: "ov-preview" }, frame),
+        h("div", { class: "presets", style: "grid-template-columns:repeat(5,1fr)", role: "group", "aria-label": T().ovPreview }, ...demos),
+        h("div", { class: "actions stack" }, button("primary wide", "plus", T().ovAdd, () => obsAction("/api/obs/overlay"))),
+        h("div", { class: "link-row" }, h("span", { class: "grow", text: T().ovLink }), copyButton(() => base + "/overlay")),
+        h("div", { class: "grid2" }, field(T().ovStyle, select("style", T().ovStyles)), field(T().ovTheme, select("theme", T().ovThemes)),
+          field(T().ovAlign, select("align", T().ovAligns)), field(T().ovFont, select("font", T().ovFonts)),
+          field(T().ovFormat, select("time_format", { s: "30s", clock: "0:30" })), field(T().ovColor, color)),
+        h("label", {}, h("span", { class: "field-label" }, T().ovSize + " ", size), scale),
+        h("div", { class: "group", style: "gap:6px" }, h("span", { class: "field-label", text: T().ovShow }),
+          h("div", { class: "grid2" }, flag("show_dot", T().ovDot), flag("show_label", T().ovLabel), flag("show_seconds", T().ovSecs), flag("show_progress", T().ovProgress))),
+        flag("hide_when_off", T().ovHide),
+        h("div", { class: "group", style: "gap:6px" }, h("span", { class: "field-label", text: T().ovTexts }),
+          h("div", { class: "grid2" }, text("label_on", "on"), text("label_adjusting", "adjusting"), text("label_replay", "replay"), text("label_off", "off"))),
+        hint(T().ovHint)];
     },
     update() {},
   },

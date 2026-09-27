@@ -21,7 +21,7 @@ ICONS = {
     "info": "info", "download": "download-simple", "key": "key", "sparkles": "magic-wand", "plug": "plugs",
     "fastforward": "fast-forward", "zap": "lightning", "live": "cell-tower", "plusminus": "plus-minus",
     "scene": "image", "mic": "microphone", "micoff": "microphone-slash", "stream": "broadcast", "record": "record",
-    "dot": "dot-outline",
+    "dot": "dot-outline", "overlay": "picture-in-picture",
 }
 WEIGHTS = ["bold", "fill"]
 BASE = "https://cdn.jsdelivr.net/npm/@phosphor-icons/core@2/assets"

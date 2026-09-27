@@ -25,6 +25,7 @@ use crate::t;
 
 pub const PANEL: &str = include_str!("panel.html");
 const DECK: &str = include_str!("deck.html");
+const OVERLAY: &str = include_str!("overlay.html");
 pub const AUTHOR_URL: &str = "https://github.com/ragnarcb";
 pub const RELEASES_URL: &str = "https://github.com/ragnarcb/obs-dynamic-delay/releases/latest";
 
@@ -61,6 +62,7 @@ pub async fn serve_http(tx: UnboundedSender<EngineMsg>, shared: Arc<Shared>) -> 
         .route("/api/obs/configure", post(obs_configure))
         .route("/api/obs/restore", post(obs_restore))
         .route("/api/obs/fps/{fps}", post(obs_fps))
+        .route("/api/obs/overlay", post(obs_overlay))
         .route("/api/update/check", post(update_check))
         .route("/api/output/{id}/{action}", post(output_action))
         .route("/api/open/{target}", post(open_target))
@@ -70,6 +72,9 @@ pub async fn serve_http(tx: UnboundedSender<EngineMsg>, shared: Arc<Shared>) -> 
     let app = Router::new()
         .route("/", get(|| async { Html(PANEL) }))
         .route("/deck", get(|| async { Html(DECK) }))
+        // read-only and without the token: it goes into an OBS Browser Source
+        .route("/overlay", get(overlay_page))
+        .route("/overlay/state", get(overlay_state))
         .merge(api)
         // the dock is a local file (origin "null"); every API call still needs the token
         .layer(CorsLayer::permissive())
@@ -242,6 +247,43 @@ async fn set_config(State(s): State<AppState>, Json(patch): Json<Value>) -> impl
         let _ = s.tx.send(EngineMsg::DestinationsChanged);
     }
     Json(json!({ "ok": true, "next_stream": false }))
+}
+
+async fn overlay_page(State(s): State<AppState>) -> Response {
+    if !s.shared.config.lock().unwrap().features.overlay {
+        return (StatusCode::NOT_FOUND, "overlay is turned off").into_response();
+    }
+    Html(OVERLAY).into_response()
+}
+
+/// Only what the on-screen widget shows, plus its look.
+async fn overlay_state(State(s): State<AppState>) -> Json<Value> {
+    let (on, look, language) = {
+        let c = s.shared.config.lock().unwrap();
+        (c.features.overlay, c.overlay.clone(), c.language.clone())
+    };
+    if !on {
+        return Json(json!({ "on": false }));
+    }
+    let st = s.shared.status.lock().unwrap();
+    Json(json!({
+        "on": true,
+        "lang": language,
+        "look": look,
+        "enabled": st.enabled,
+        "delay_seconds": st.delay_seconds,
+        "live": st.engine.is_some(),
+        "phase": st.engine.as_ref().map(|e| e.phase),
+        "current_ms": st.engine.as_ref().map_or(0, |e| e.current_ms),
+        "target_ms": st.engine.as_ref().map_or(0, |e| e.target_ms),
+        "replaying": st.engine.as_ref().is_some_and(|e| e.replaying),
+    }))
+}
+
+/// Adds the widget to the current OBS scene as a Browser Source.
+async fn obs_overlay(State(s): State<AppState>) -> impl IntoResponse {
+    let port = s.shared.config.lock().unwrap().http_port();
+    queue_obs_action(&s, ObsAction::AddOverlay(format!("http://127.0.0.1:{port}/overlay")))
 }
 
 fn queue_obs_action(s: &AppState, action: ObsAction) -> Json<Value> {

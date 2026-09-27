@@ -9,7 +9,7 @@ pub const YOUTUBE_URL: &str = "rtmp://a.rtmp.youtube.com/live2";
 
 /// Panel modules, in their default order. `panel_modules` lists the visible ones.
 pub const ALL_MODULES: &[&str] = &[
-    "delay", "censor", "replay", "clips", "panic", "health", "multistream", "rules", "chat", "phone", "streamdeck",
+    "delay", "censor", "replay", "clips", "panic", "health", "multistream", "rules", "chat", "phone", "streamdeck", "overlay",
 ];
 pub const DEFAULT_MODULES: &[&str] = &["delay", "censor", "health"];
 
@@ -37,6 +37,85 @@ pub const DECK_ACTIONS: &[&str] = &[
     "delay.toggle", "delay.on", "delay.off", "delay.set", "delay.add", "censor", "replay", "clip", "panic", "catchup",
     "obs.scene", "obs.mute", "obs.stream", "obs.record", "dest.toggle",
 ];
+
+/// On-screen widget (OBS Browser Source at /overlay) that tells viewers the delay is on.
+/// Every field can also be overridden per source with a URL parameter of the same name.
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[serde(default)]
+pub struct Overlay {
+    /// "pill", "card" or "minimal" (text only, no box).
+    pub style: String,
+    /// "dark", "light" or "outline" (pill and card only).
+    pub theme: String,
+    pub show_dot: bool,
+    pub show_label: bool,
+    pub show_seconds: bool,
+    /// Progress line while the delay builds up or goes down.
+    pub show_progress: bool,
+    /// Hidden while the delay is off (else shows the "off" text).
+    pub hide_when_off: bool,
+    /// Custom texts (empty = default text in the panel language).
+    pub label_on: String,
+    pub label_off: String,
+    pub label_adjusting: String,
+    pub label_replay: String,
+    /// "s" (30s) or "clock" (0:30).
+    pub time_format: String,
+    /// Color of the dot and the progress line (#rrggbb).
+    pub accent: String,
+    /// Size in percent (50 to 300).
+    pub scale: u32,
+    /// "left", "center" or "right" inside the source.
+    pub align: String,
+    /// "sans", "mono" or "condensed".
+    pub font: String,
+}
+
+impl Default for Overlay {
+    fn default() -> Self {
+        Overlay {
+            style: "pill".into(),
+            theme: "dark".into(),
+            show_dot: true,
+            show_label: true,
+            show_seconds: true,
+            show_progress: true,
+            hide_when_off: true,
+            label_on: String::new(),
+            label_off: String::new(),
+            label_adjusting: String::new(),
+            label_replay: String::new(),
+            time_format: "s".into(),
+            accent: "#e5484d".into(),
+            scale: 100,
+            align: "left".into(),
+            font: "sans".into(),
+        }
+    }
+}
+
+impl Overlay {
+    fn normalize(&mut self) {
+        let pick = |v: &mut String, ok: &[&str]| {
+            if !ok.contains(&v.as_str()) {
+                *v = ok[0].into();
+            }
+        };
+        pick(&mut self.style, &["pill", "card", "minimal"]);
+        pick(&mut self.theme, &["dark", "light", "outline"]);
+        pick(&mut self.time_format, &["s", "clock"]);
+        pick(&mut self.align, &["left", "center", "right"]);
+        pick(&mut self.font, &["sans", "mono", "condensed"]);
+        let hex = self.accent.len() == 7 && self.accent.starts_with('#') && self.accent[1..].chars().all(|c| c.is_ascii_hexdigit());
+        if !hex {
+            self.accent = "#e5484d".into();
+        }
+        self.scale = self.scale.clamp(50, 300);
+        for l in [&mut self.label_on, &mut self.label_off, &mut self.label_adjusting, &mut self.label_replay] {
+            *l = l.chars().take(24).collect();
+        }
+    }
+}
 
 /// One key of the phone deck.
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
@@ -112,6 +191,8 @@ pub struct Features {
     pub phone: bool,
     /// The panel checks GitHub for new versions.
     pub update_check: bool,
+    /// On-screen widget page (/overlay) for an OBS Browser Source.
+    pub overlay: bool,
 }
 
 impl Default for Features {
@@ -127,6 +208,7 @@ impl Default for Features {
             chat: false,
             phone: false,
             update_check: true,
+            overlay: true,
         }
     }
 }
@@ -210,6 +292,9 @@ pub struct Config {
 
     /// Keys of the phone deck.
     pub deck: Deck,
+
+    /// On-screen widget.
+    pub overlay: Overlay,
 }
 
 impl Default for Config {
@@ -245,6 +330,7 @@ impl Default for Config {
             panel_modules: DEFAULT_MODULES.iter().map(|s| s.to_string()).collect(),
             features: Features::default(),
             deck: Deck::default(),
+            overlay: Overlay::default(),
         }
     }
 }
@@ -300,6 +386,7 @@ impl Config {
         self.deck.columns = self.deck.columns.clamp(2, 6);
         self.deck.keys.retain(|k| DECK_ACTIONS.contains(&k.action.as_str()));
         self.deck.keys.truncate(48);
+        self.overlay.normalize();
         let mut seen = Vec::new();
         self.panel_modules.retain(|m| ALL_MODULES.contains(&m.as_str()) && !seen.contains(m) && {
             seen.push(m.clone());
@@ -452,5 +539,23 @@ mod tests {
         );
         assert_eq!(destination_from_obs("rtmp://127.0.0.1:1935/live", ""), None);
         assert_eq!(destination_from_obs("", "Some service"), None);
+    }
+
+    #[test]
+    fn overlay_values_are_kept_valid() {
+        let mut c = Config::default();
+        c.overlay.style = "neon".into();
+        c.overlay.accent = "red".into();
+        c.overlay.scale = 5;
+        c.overlay.label_on = "x".repeat(40);
+        c.normalize();
+        assert_eq!(c.overlay.style, "pill");
+        assert_eq!(c.overlay.accent, "#e5484d");
+        assert_eq!(c.overlay.scale, 50);
+        assert_eq!(c.overlay.label_on.chars().count(), 24);
+        // an old config without the [overlay] table gets the defaults
+        let old: Config = toml::from_str("language = \"pt\"").unwrap();
+        assert_eq!(old.overlay, Overlay::default());
+        assert!(old.features.overlay);
     }
 }

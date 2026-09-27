@@ -2,6 +2,12 @@
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [SemVer](https://semver.org/).
 
+## [0.11.0] - 2026-09-26
+
+### Added
+
+- **On-screen widget:** a minimal badge for viewers (OBS Browser Source at `/overlay`) showing that the delay is on and how many seconds, with states for building up / going back to live (progress line) and instant replay. Customizable in a new panel block with a live preview: style (pill, card, text only), theme (dark, light, outline), which parts show (dot, text, seconds, progress), own texts, color, size, alignment, font, time format, hide while off. "Add to the current OBS scene" creates the Browser Source; URL parameters override any setting per source. The page needs no token and only exposes the delay state; it can be switched off under Features and panel.
+
 ## [0.10.0] - 2026-09-25
 
 ### Added
