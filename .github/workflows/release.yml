@@ -16,6 +16,7 @@ jobs:
     runs-on: windows-latest
     env:
       HAS_CERT: ${{ secrets.SIGN_PFX_BASE64 != '' }}
+      HAS_DISCORD: ${{ secrets.DISCORD_RELEASE_WEBHOOK != '' }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -46,3 +47,10 @@ jobs:
           if (gh release view $tag 2>$null) { gh release upload $tag @files --clobber }
           elseif (Test-Path $notes) { gh release create $tag @files --title $tag --notes-file $notes }
           else { gh release create $tag @files --title $tag --generate-notes }
+      - name: Announce on Discord
+        if: env.HAS_DISCORD == 'true'
+        shell: pwsh
+        env:
+          DISCORD_RELEASE_WEBHOOK: ${{ secrets.DISCORD_RELEASE_WEBHOOK }}
+          DISCORD_AVISOS_ROLE: ${{ vars.DISCORD_AVISOS_ROLE }}
+        run: ./scripts/announce_discord.ps1 -Tag "${{ github.ref_name }}"
