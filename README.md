@@ -47,7 +47,7 @@ OBS' built-in "Stream Delay" can only be changed while the stream is stopped. Wi
 - **Connection drop protection:** if a platform connection drops, what could not be sent is kept and sent after it reconnects, so viewers miss nothing.
 
 **Control**
-- A **panel inside OBS** made of blocks: show only what you use, in the order you want.
+- A **panel inside OBS** made of blocks: show only what you use, in the order you want, and minimize the ones you rarely open.
 - **Every feature can be switched off for real**, not just hidden: an off feature does no work at all.
 - **Your phone becomes a Stream Deck:** a grid of keys you design (delay, delete, replay, clip, panic, OBS scenes, mute audio sources, start/stop streaming and recording), lit with the live state. Open it with a QR code.
 - OBS **hotkeys**, a **Stream Deck plugin** and **Twitch chat commands** for you and your mods.

@@ -286,6 +286,8 @@ pub struct Config {
 
     /// Visible panel modules, in order.
     pub panel_modules: Vec<String>,
+    /// Panel modules shown minimized (only their title bar).
+    pub panel_collapsed: Vec<String>,
 
     /// Optional features on/off.
     pub features: Features,
@@ -328,6 +330,7 @@ impl Default for Config {
             udp_listen: "127.0.0.1:8788".into(),
             api_token: String::new(),
             panel_modules: DEFAULT_MODULES.iter().map(|s| s.to_string()).collect(),
+            panel_collapsed: Vec::new(),
             features: Features::default(),
             deck: Deck::default(),
             overlay: Overlay::default(),
@@ -387,6 +390,8 @@ impl Config {
         self.deck.keys.retain(|k| DECK_ACTIONS.contains(&k.action.as_str()));
         self.deck.keys.truncate(48);
         self.overlay.normalize();
+        self.panel_collapsed.retain(|m| ALL_MODULES.contains(&m.as_str()));
+        self.panel_collapsed.dedup();
         let mut seen = Vec::new();
         self.panel_modules.retain(|m| ALL_MODULES.contains(&m.as_str()) && !seen.contains(m) && {
             seen.push(m.clone());

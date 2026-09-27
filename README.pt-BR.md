@@ -47,7 +47,7 @@ O "Stream Delay" que já vem no OBS só pode ser mudado com a live parada. Com o
 - **Proteção contra queda de conexão:** se a conexão com uma plataforma cair, o que não foi enviado fica guardado e é enviado quando ela voltar, e o público não perde nada.
 
 **Controle**
-- Um **painel dentro do OBS** feito de blocos: mostre só o que você usa, na ordem que quiser.
+- Um **painel dentro do OBS** feito de blocos: mostre só o que você usa, na ordem que quiser, e minimize os que abre pouco.
 - **Todo recurso pode ser desligado de verdade**, não só escondido: um recurso desligado não faz nada.
 - **O celular vira um Stream Deck:** uma grade de botões que você monta (delay, apagar, replay, clipe, pânico, cenas do OBS, mutar fontes de áudio, iniciar/parar transmissão e gravação), acesos com o estado ao vivo. Abre por QR code.
 - **Atalhos** do OBS, **plugin do Stream Deck** e **comandos no chat da Twitch** para você e seus mods.

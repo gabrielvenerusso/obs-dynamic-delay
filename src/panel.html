@@ -70,10 +70,14 @@
   .eyebrow { font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--text-3); margin: 0; }
 
   /* ------------------------------------------------------------ delay hero */
-  .hero { padding: 14px 14px 12px; display: grid; gap: 12px; position: relative; overflow: hidden; --tone: var(--text-3); }
-  .hero::before { content: ""; position: absolute; inset: 0 0 auto 0; height: 2px; background: var(--tone); opacity: .9; transition: background var(--med); }
-  .hero[data-tone=live] { --tone: var(--live); } .hero[data-tone=delayed] { --tone: var(--delay); }
-  .hero[data-tone=busy] { --tone: var(--busy); } .hero[data-tone=bad] { --tone: var(--bad); }
+  .hero-card { position: relative; overflow: hidden; --tone: var(--text-3); }
+  .hero-card::before { content: ""; position: absolute; inset: 0 0 auto 0; height: 2px; background: var(--tone); opacity: .9; transition: background var(--med); }
+  .hero-card[data-tone=live] { --tone: var(--live); } .hero-card[data-tone=delayed] { --tone: var(--delay); }
+  .hero-card[data-tone=busy] { --tone: var(--busy); } .hero-card[data-tone=bad] { --tone: var(--bad); }
+  .hero { padding: 12px 14px; display: grid; gap: 12px; }
+  /* state shown in the title bar of a minimized block */
+  .mini { font-size: 12px; font-weight: 600; color: var(--tone, var(--text-2)); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  details[open] > summary .mini { display: none; }
   .hero-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 22px; }
   .phase { color: var(--text-2); font-size: 12px; text-align: right; }
   .readout { display: flex; align-items: baseline; gap: 6px; }
@@ -619,6 +623,7 @@ const MODULES = {
       this.big.textContent = num(cur);
       this.fill.style.transform = `scaleX(${Math.min(1, cur / Math.max(1, s.delay_seconds, cur))})`;
       this.sub.textContent = `${T().delayForViewers} · ${T().setTo} ${s.delay_seconds} s`;
+      this.mini.textContent = e ? `${this.pill.textContent} · ${num(cur)} s` : this.pill.textContent;
       this.toggle.className = "btn wide " + (s.enabled ? "warn" : "primary");
       this.toggle.lbl.textContent = s.enabled ? T().toggleOff : T().toggleOn(s.delay_seconds);
       for (const b of this.presets) b.setAttribute("aria-pressed", String(s.enabled && s.delay_seconds === b.secs));
@@ -1086,16 +1091,25 @@ function buildAll() {
     const m = MODULES[id];
     if (!m || !featureOn(id)) continue;
     m.loaded = false;
-    let card;
-    if (id === "delay") card = h("section", { class: "card hero", "data-module": id, "aria-label": T().m.delay }, m.build());
-    else card = h("section", { class: "card", "data-module": id },
-      h("header", { class: "card-head" }, badge(id), h("h2", { class: "card-title", text: T().m[id] })), h("div", { class: "card-body" }, m.build()));
+    m.mini = h("span", { class: "mini" });
+    const head = h("summary", {}, badge(id), h("h2", { class: "card-title", text: T().m[id] }), m.mini, icon("chevron", "chev"));
+    const card = h("details", { class: "card" + (id === "delay" ? " hero-card" : ""), "data-module": id },
+      head, h("div", { class: id === "delay" ? "hero" : "card-body" }, m.build()));
+    card.open = !cfg.panel_collapsed.includes(id);
+    card.addEventListener("toggle", () => setCollapsed(id, !card.open));
     m.card = card;
     root.append(card);
   }
   buildSettings();
   buildCustomize();
   if (status) render(status);
+}
+
+// Saved without rebuilding the panel (the block is already open or closed).
+function setCollapsed(id, closed) {
+  if (cfg.panel_collapsed.includes(id) === closed) return;
+  cfg.panel_collapsed = closed ? [...cfg.panel_collapsed, id] : cfg.panel_collapsed.filter((m) => m !== id);
+  api("/api/config", { body: { panel_collapsed: cfg.panel_collapsed } }).then((r) => { if (!r.ok) toast(r.error, "error"); });
 }
 
 function toast(text, kind) {
@@ -1229,6 +1243,7 @@ async function refresh() {
       const pill = hero.querySelector(".pill");
       pill.className = "pill off"; pill.textContent = T().relayOff;
       hero.dataset.tone = "bad";
+      hero.querySelector(".mini").textContent = T().relayOff;
     }
     if (!cfg) $("modules").replaceChildren(h("div", { class: "card empty" }, h("span", { class: "ico tone-red" }, icon("plug")),
       h("b", { text: T().relayClosed }), hint(T().relayClosedHint)));

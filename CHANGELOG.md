@@ -2,6 +2,12 @@
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [SemVer](https://semver.org/).
 
+## [0.11.1] - 2026-09-27
+
+### Changed
+
+- **Every panel block can be minimized**, like Settings and Features and panel: click its title bar. Minimized blocks stay minimized after OBS restarts (`panel_collapsed` in the config). A minimized Delay block still shows the state and the seconds in its title bar.
+
 ## [0.11.0] - 2026-09-26
 
 ### Added
