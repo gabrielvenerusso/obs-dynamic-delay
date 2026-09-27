@@ -2,7 +2,7 @@
 
 <h1 align="center">Dynamic Delay for OBS</h1>
 
-**English** · [Português](README.pt-BR.md) · Developed by [ragnarcb](https://github.com/ragnarcb)
+**English** · [Português](README.pt-BR.md) · [Español](README.es.md) · Developed by [ragnarcb](https://github.com/ragnarcb) · **[Discord community](https://discord.gg/crctbnQ2f8)**
 
 Turn your stream delay on and off **at any moment, while you are live**, and get a toolkit around it: delete what should not air, instant replays, clips, multistream, protection against connection drops, and more. Everything lives in a panel inside OBS that you shape to your needs.
 
@@ -32,7 +32,8 @@ OBS' built-in "Stream Delay" can only be changed while the stream is stopped. Wi
 ## Features
 
 **Delay**
-- Switch the delay on and off while live, presets (10, 30, 60, 120 s) and ±5 s steps.
+- Switch the delay on and off while live, with your own preset buttons (10, 30, 60, 120 s by default; many esports tournaments ask for 120 to 300 s) and ±5 s steps.
+- **Auto-off timer:** turn the delay off by itself after 15 to 120 minutes, so it is not left on after the ranked match.
 - Three ways to apply it: **rewind** (no freeze), show one of your **OBS scenes**, or **freeze** the picture.
 - **Delay by scene:** the delay switches by itself when a scene goes on air (for example on in "Ranked", off in "Just chatting").
 
@@ -53,7 +54,7 @@ OBS' built-in "Stream Delay" can only be changed while the stream is stopped. Wi
 - OBS **hotkeys**, a **Stream Deck plugin** and **Twitch chat commands** for you and your mods.
 - **On-screen widget:** a minimal badge that shows viewers the delay is on and how many seconds, with style, theme, texts, color and size to choose. One click adds it to OBS.
 - **Stream health:** input bitrate, per destination status, and a beep when a connection drops.
-- **English and Portuguese** everywhere.
+- **English, Portuguese and Spanish** everywhere.
 
 **Lightweight:** nothing is re-encoded. The relay only buffers and forwards the video OBS already encoded, with negligible CPU use.
 
@@ -61,7 +62,7 @@ OBS' built-in "Stream Delay" can only be changed while the stream is stopped. Wi
 
 > Requirements: Windows 10/11 and OBS Studio 28 or newer, opened at least once.
 
-**[Download Dynamic-Delay-Setup.exe](https://github.com/ragnarcb/obs-dynamic-delay/releases/latest/download/Dynamic-Delay-Setup.exe)** (always the latest version, English and Portuguese in one file).
+**[Download Dynamic-Delay-Setup.exe](https://github.com/ragnarcb/obs-dynamic-delay/releases/latest/download/Dynamic-Delay-Setup.exe)** (always the latest version, English, Portuguese and Spanish in one file).
 
 1. Run it and pick the language. Windows may show "Windows protected your PC" while the program is new and not yet code-signed: click **More info > Run anyway**.
 2. Follow the wizard (welcome, license, install). No administrator rights are needed: it installs for your Windows user. If OBS is open, the Setup asks you to close it (OBS rewrites its settings when it closes).
@@ -193,7 +194,7 @@ Rules such as "**Ranked** on air: turn on with 60 s" and "**Just chatting**: tur
 
 Turn it on under **Features and panel** and type your channel name in the **Twitch chat commands** block (just the name, a `twitch.tv/...` link works too). The relay reads the chat anonymously (no login, no token) and only accepts commands from you, your mods, or also VIPs:
 
-`!delay on` · `!delay off` · `!delay 60` (turns on with 60 s) · `!delay censor [s]` · `!delay replay [s]` · `!delay clip [s]` · `!delay panic` (Portuguese aliases work too: `ligar`, `desligar`, `apagar`, `clipe`, `panico`).
+`!delay on` · `!delay off` · `!delay 60` (turns on with 60 s) · `!delay 60 20m` (on with 60 s for 20 minutes) · `!delay timer 20` / `!delay timer off` · `!delay censor [s]` · `!delay replay [s]` · `!delay clip [s]` · `!delay panic` (Portuguese words work when the panel is in Portuguese: `ligar`, `desligar`, `apagar`, `clipe`, `panico`; Spanish ones when it is in Spanish: `encender`, `apagar` (off), `borrar`, `repetir`, `pánico`).
 
 ### Phone deck
 
@@ -235,9 +236,18 @@ A small badge on your stream that tells viewers the delay is on, and how many se
 | Texts | your own words for on, adjusting, replay and off (empty = default) |
 | Also | color, size (50 to 300%), alignment, font (sans, mono, condensed), time as `30s` or `0:30`, hide while the delay is off |
 
-States: **Delay** (red dot) while viewers are behind, **Adjusting** (amber, with the progress line) while the delay builds up or goes back to live, **Replay** (blue) during an instant replay. It hides when you are not live, and while the delay is off unless you turn that off.
+States: **Delay** (red dot) while viewers are behind, **Adjusting** (amber, with the progress line) while the delay builds up or goes back to live, **Replay** (blue) during an instant replay. While you are not live it shows the set delay, so you can place and style it in OBS before going live (turn off "Show it while not live too" to hide it offline, for example while recording). Live, it hides while the delay is off unless you turn that off.
 
 Changes apply on stream right away. For a second look in another scene, add URL parameters to the link, with the same names as the settings: `?style=minimal&scale=150&show_label=0&accent=22c55e`. The Browser Source's Custom CSS field works too. The page is read-only and needs no token: it only shows the delay state.
+
+### Push events for bots
+
+Bots such as Streamer.bot, SAMMI or Advanced Scene Switcher can listen to `/api/events` (Server-Sent Events, token in `?token=` or the `x-dd-token` header) and get a JSON event on every change: `delay_on` / `delay_off`, `delay_seconds`, `phase`, `replay_start` / `replay_end`, `censor`, `clip_saved`, `panic_on` / `panic_off`, `destination`, `auto_off_timer` and `auto_off`. The stream starts with a `hello` snapshot and sends a keep-alive every 15 s.
+
+```
+event: delay_off
+data: {"type":"delay_off","delay_seconds":60,"ts":1790481858596}
+```
 
 ## Hotkeys
 
@@ -265,6 +275,8 @@ The plugin was tested against a simulated Stream Deck, not on real hardware yet:
 
 ## Troubleshooting
 
+Still stuck? Ask in the [Discord server](https://discord.gg/crctbnQ2f8) (#suporte) or open a GitHub issue.
+
 | Symptom | What to do |
 |---|---|
 | The panel shows **RELAY CLOSED** | Normal while OBS is starting. If it stays, open **Tools > Scripts**, check that `obs-dynamic-delay.lua` is listed and click "Restart relay". |
@@ -284,7 +296,7 @@ When opening an issue, attach `obs-dynamic-delay.log`. The stream keys are not w
 
 ## Updating and uninstalling
 
-The relay checks GitHub for a new version when it starts, every 6 hours and when you click **Check now** (Settings > General > Updates, which also shows "up to date" and the time of the last check). A new version shows a banner in the panel, a notice, and a line in the script's status in OBS (Tools > Scripts). With **Update notice** off under Features and panel, no connection is made. To update, run the new `Dynamic-Delay-Setup.exe`: it installs over the old version and keeps your settings and keys. To uninstall, use Windows **Settings > Apps > Dynamic Delay for OBS**: it removes the script and the panel, restores the original stream settings and asks whether to delete your settings too. The Setup also accepts the usual Inno Setup options (`/SILENT`, `/VERYSILENT`, `/LANG=en|pt`).
+The relay checks GitHub for a new version when it starts, every 6 hours and when you click **Check now** (Settings > General > Updates, which also shows "up to date" and the time of the last check). A new version shows a banner in the panel, a notice, and a line in the script's status in OBS (Tools > Scripts). With **Update notice** off under Features and panel, no connection is made. To update, run the new `Dynamic-Delay-Setup.exe`: it installs over the old version and keeps your settings and keys. To uninstall, use Windows **Settings > Apps > Dynamic Delay for OBS**: it removes the script and the panel, restores the original stream settings and asks whether to delete your settings too. The Setup also accepts the usual Inno Setup options (`/SILENT`, `/VERYSILENT`, `/LANG=en|pt|es`).
 
 ## Security
 
@@ -292,7 +304,7 @@ The relay checks GitHub for a new version when it starts, every 6 hours and when
 - The API never returns stream keys or the token. The on-screen widget page (`/overlay`) is the only thing without the token: it is read-only and shows the delay state and nothing else.
 - By default the panel only listens on your PC (`127.0.0.1`). The **phone deck** (off by default) opens it to your local network, still protected by the token. A deck key only runs the action saved for it in the editor.
 - Features you switch off do nothing: no chat connection, no LAN port, no extra buffers.
-- The relay only ever opens three fixed places on your PC when asked (the author's GitHub, the releases page, the clips folder).
+- The relay only ever opens a few fixed places on your PC when asked (the author's GitHub, the releases page, the support section, the Discord invite, the clips folder).
 
 ## How it works
 
@@ -321,7 +333,8 @@ OBS ──RTMP──▶ 127.0.0.1:1935 ──▶ delay engine ──▶ one RTMP
 
 | Route | Action |
 |---|---|
-| `/api/cmd/{cmd}` · `/api/cmd/{cmd}/{arg}` | `toggle`, `on`, `off`, `set/30`, `add/-5`, `censor[/s]`, `replay[/s]`, `clip[/s]`, `panic`, `catchup` |
+| `/api/cmd/{cmd}` · `/api/cmd/{cmd}/{arg}` | `toggle`, `on`, `off`, `set/30`, `add/-5`, `censor[/s]`, `replay[/s]`, `clip[/s]`, `panic`, `catchup`, `autooff/20` (0 = cancel), `onfor/20` (on for 20 min) |
+| `/api/events` | push events (Server-Sent Events), see [Push events for bots](#push-events-for-bots) |
 | `/api/status` | state as JSON (delay, engine, destinations, health, panic, last clip, events) |
 | `/api/config` | reads (GET) or changes (POST JSON, only the fields you send) the settings |
 | `/api/obs/configure` · `/api/obs/restore` | asks the OBS script to configure or restore the stream settings |
@@ -357,7 +370,7 @@ Run only the relay: `obs-dynamic-delay.exe path\config.toml`. Test the installer
 | `src/clip.rs` | MP4/FLV clip writer |
 | `src/chat.rs` | Twitch chat commands |
 | `src/installer.rs` | windowed and console installer |
-| `src/i18n.rs` | English and Portuguese texts (`t!` macro) |
+| `src/i18n.rs` | English, Portuguese and Spanish texts (`t!` macro; a missing Spanish text falls back to English) |
 | `src/panel.html` | panel; each block is an entry in `MODULES`, texts in `TEXT` |
 | `src/deck.html` | phone deck |
 | `src/overlay.html` | on-screen widget (Browser Source) |

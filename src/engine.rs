@@ -786,7 +786,7 @@ mod tests {
                 self.now_ms += 1;
                 let now = self.t0 + Duration::from_millis(self.now_ms);
                 while self.frame * 1000 / 30 <= self.now_ms {
-                    let key = self.frame % 60 == 0;
+                    let key = self.frame.is_multiple_of(60);
                     let mut data = if key { vec![0x17, 1, 0, 0, 0] } else { vec![0x27, 1, 0, 0, 0] };
                     data.extend_from_slice(&(self.frame as u32).to_be_bytes());
                     self.engine.push(Kind::Video, self.frame * 1000 / 30, data.into(), now);
@@ -1060,6 +1060,70 @@ mod tests {
         // decoder config goes out immediately, then the first frame starts the freeze
         assert_eq!(out.len(), 2);
         assert_eq!(engine.status(t0).phase, Phase::Filling);
+    }
+
+    /// A 20 min, 8 Mbps / 60 fps stream with the longest delay (600 s) and a
+    /// rewind history: the buffers must stay within the delay and the history
+    /// window, and the per-packet work must stay far below real time.
+    #[test]
+    fn long_delay_at_8_mbps_is_bounded_and_cheap() {
+        // payloads share one allocation each, so the test measures the engine, not malloc
+        let mut key = vec![0x17, 1, 0, 0, 0];
+        key.resize(120_000, 0);
+        let mut inter = vec![0x27, 1, 0, 0, 0];
+        inter.resize(15_000, 0);
+        let (key, inter) = (Bytes::from(key), Bytes::from(inter));
+        let audio = Bytes::from_static(&[0xAF, 1, 0x21, 0, 0, 0, 0, 0]);
+
+        let mut engine = Engine::new(30);
+        let window = Duration::from_secs(665);
+        engine.set_grow_mode(GrowMode::Rewind, window);
+        let t0 = Instant::now();
+        engine.push(Kind::Video, 0, Bytes::from_static(&AVC_HDR), t0);
+        engine.push(Kind::Audio, 0, Bytes::from_static(&AAC_HDR), t0);
+        let (mut frame, mut aframe, mut sent) = (0u64, 0u64, 0usize);
+        let mut out = Vec::new();
+        let started = Instant::now();
+        let mut run = |engine: &mut Engine, from_ms: u64, to_ms: u64| {
+            // one poll every 5 ms, like the main loop
+            for now_ms in (from_ms..to_ms).step_by(5) {
+                let now = t0 + Duration::from_millis(now_ms);
+                while frame * 1000 / 60 <= now_ms {
+                    let data = if frame.is_multiple_of(120) { key.clone() } else { inter.clone() };
+                    engine.push(Kind::Video, frame * 1000 / 60, data, now);
+                    frame += 1;
+                }
+                while aframe * 1024 * 1000 / 48000 <= now_ms {
+                    engine.push(Kind::Audio, aframe * 1024 * 1000 / 48000, audio.clone(), now);
+                    aframe += 1;
+                }
+                engine.poll(now, &mut out);
+                sent += out.len();
+                out.clear();
+            }
+        };
+        run(&mut engine, 0, 700_000);
+        engine.set_target(Duration::from_secs(600));
+        run(&mut engine, 700_000, 1_300_000);
+        let now = t0 + Duration::from_millis(1_300_000);
+        let st = engine.status(now);
+        assert_eq!(st.phase, Phase::Delayed, "{st:?}");
+        assert!((599_000..=601_000).contains(&st.current_ms), "{st:?}");
+        // the queue holds the delay (about 1 MB/s at 8 Mbps), not more
+        assert!(st.buffered_ms <= 601_000, "{st:?}");
+        assert!(st.buffered_bytes < 610 << 20, "{st:?}");
+        let span = |q: &VecDeque<Queued>| q.back().unwrap().arrival - q.front().unwrap().arrival;
+        assert!(span(&engine.history) <= window, "history {:?}", span(&engine.history));
+        let clip = engine.snapshot(now, Duration::from_secs(120), false).unwrap();
+        assert!(clip.packets.len() > 120 * 100, "{}", clip.packets.len());
+        engine.set_target(Duration::ZERO);
+        run(&mut engine, 1_300_000, 1_305_000);
+        assert_eq!(engine.status(t0 + Duration::from_millis(1_305_000)).phase, Phase::Live);
+        let took = started.elapsed();
+        assert!(sent > 100_000, "{sent}");
+        // ~260k polls and ~140k packets: well under a second in release builds
+        assert!(took < Duration::from_secs(5), "took {took:?}");
+        eprintln!("long delay: {sent} packets out, {took:?}");
     }
 
     #[test]

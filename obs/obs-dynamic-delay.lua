@@ -9,7 +9,7 @@
 -- * phone deck: switch scenes, toggle mute, start/stop streaming and recording
 -- * keeps the platform's encoder rules (bitrate cap, 2 s keyframes) while OBS streams to the relay
 --
--- Texts are English or Portuguese, following `language` in config.toml.
+-- Texts are English, Portuguese or Spanish, following `language` in config.toml.
 
 obs = obslua
 local ffi = require("ffi")
@@ -26,9 +26,10 @@ local lang = "en"
 local api_token = ""
 local dest_urls = {}
 
--- Picks the text for the configured language.
-local function L(en, pt)
+-- Picks the text for the configured language (Spanish falls back to English).
+local function L(en, pt, es)
   if lang == "pt" then return pt end
+  if lang == "es" and es then return es end
   return en
 end
 
@@ -188,7 +189,7 @@ end
 local function launch()
   local exe = exe_path()
   if not exists(exe) then
-    obs.script_log(obs.LOG_WARNING, L("relay executable not found: ", "executavel do relay nao encontrado: ") .. exe)
+    obs.script_log(obs.LOG_WARNING, L("relay executable not found: ", "executável do relay não encontrado: ", "no se encontró el ejecutable del relay: ") .. exe)
     return false
   end
   if is_windows then
@@ -196,7 +197,7 @@ local function launch()
     -- 0 = SW_HIDE: the relay runs in the background, logs go to obs-dynamic-delay.log
     local r = shell32.ShellExecuteA(nil, "open", exe, '"' .. config_path() .. '"', wd, 0)
     if tonumber(ffi.cast("intptr_t", r)) <= 32 then
-      obs.script_log(obs.LOG_WARNING, L("could not start ", "falha ao iniciar ") .. exe)
+      obs.script_log(obs.LOG_WARNING, L("could not start ", "falha ao iniciar ", "no se pudo iniciar ") .. exe)
       return false
     end
   else
@@ -230,7 +231,7 @@ local function restart_tick()
     launch()
   elseif restart_tries > 15 then
     obs.timer_remove(restart_tick)
-    obs.script_log(obs.LOG_WARNING, L("the relay did not close for the restart", "o relay nao fechou para reiniciar"))
+    obs.script_log(obs.LOG_WARNING, L("the relay did not close for the restart", "o relay não fechou para reiniciar", "el relay no se cerró para reiniciarse"))
   end
 end
 
@@ -276,9 +277,14 @@ local function set_service(type_id, data)
   obs.obs_service_release(svc)
 end
 
-local function report(msg)
-  send("result " .. msg)
+-- Shows the outcome of an action in the panel (ok = green toast, error = red).
+local function report(msg, is_error)
+  send("result " .. (is_error and "error" or "ok") .. "\t" .. msg)
   if S then obs.obs_data_set_string(S, "status_info", msg) end
+end
+
+local function report_error(msg)
+  report(msg, true)
 end
 
 ---------------------------------------------------------------------------
@@ -288,9 +294,14 @@ end
 -- 4 s keyframe 1080p60 stream is off-spec for Twitch and viewers drop to 720p.
 -- This keeps those rules while OBS streams through the relay.
 ---------------------------------------------------------------------------
+-- Kick ingests are "<12 hex>.global-contribute.live-video.net"; Twitch uses
+-- live-video.net too ("ingest.global-contribute...", regional "*.contribute...").
+local function is_kick_host(h)
+  return h:find("^" .. ("%x"):rep(12) .. "%.global%-contribute%.live%-video%.net$") ~= nil or h:find("kick%.com$") ~= nil
+end
 local PLATFORMS = {
-  { name = "Twitch", max = 6000, match = function(h) return h:find("twitch%.tv$") or h:find("^ingest%..*live%-video%.net$") end },
-  { name = "Kick", max = 8000, match = function(h) return h:find("live%-video%.net$") end },
+  { name = "Kick", max = 8000, match = is_kick_host },
+  { name = "Twitch", max = 6000, match = function(h) return h:find("twitch%.tv$") or h:find("contribute%.live%-video%.net$") end },
   { name = "YouTube", max = nil, match = function(h) return h:find("youtube%.com$") end },
 }
 
@@ -345,7 +356,7 @@ local function apply_platform_limits(service_name)
       end
       if keyint == 0 or keyint > 2 then
         obs.obs_data_set_int(file, "keyint_sec", 2)
-        table.insert(changes, L("keyframe every 2 s", "keyframe a cada 2 s"))
+        table.insert(changes, L("keyframe every 2 s", "keyframe a cada 2 s", "keyframe cada 2 s"))
       end
       if #changes > 0 then
         obs.obs_data_save_json_safe(file, path, "tmp", "bak")
@@ -370,14 +381,14 @@ local function apply_platform_limits(service_name)
     end
   end
   if #changes == 0 then return nil end
-  local note = L("encoder set to the ", "encoder ajustado às regras da ") .. lim.names .. L(" rules (", " (") .. table.concat(changes, ", ") .. ")"
+  local note = L("encoder set to the ", "encoder ajustado às regras da ", "encoder ajustado a las reglas de ") .. lim.names .. L(" rules (", " (", " (") .. table.concat(changes, ", ") .. ")"
   obs.script_log(obs.LOG_INFO, note)
   return note
 end
 
 local function configure_obs()
   if obs.obs_frontend_streaming_active() then
-    report(L("Stop the stream before configuring OBS.", "Pare a live antes de configurar o OBS."))
+    report_error(L("Stop the stream before configuring OBS.", "Pare a live antes de configurar o OBS.", "Detén la transmisión antes de configurar OBS."))
     return
   end
   local notes = {}
@@ -392,8 +403,9 @@ local function configure_obs()
     obs.obs_data_save_json(backup, backup_path())
     obs.obs_data_release(st)
     obs.obs_data_release(backup)
-    send("import\t" .. (info.server or "") .. "\t" .. (info.key or "") .. "\t" .. (info.service or ""))
-    table.insert(notes, L("destination and key imported from OBS", "destino e chave importados do OBS"))
+    -- from the poll socket: the relay only takes an import from the address that polls
+    send_on(poll_sock, "import\t" .. (info.server or "") .. "\t" .. (info.key or "") .. "\t" .. (info.service or ""))
+    table.insert(notes, L("destination and key imported from OBS", "destino e chave importados do OBS", "destino y clave importados de OBS"))
     imported_service = info.service
   end
 
@@ -403,24 +415,24 @@ local function configure_obs()
   obs.obs_data_set_bool(data, "use_auth", false)
   set_service("rtmp_custom", data)
   obs.obs_data_release(data)
-  table.insert(notes, L("OBS streams to ", "OBS transmite para ") .. relay_server())
+  table.insert(notes, L("OBS streams to ", "OBS transmite para ", "OBS transmite a ") .. relay_server())
 
   local ok = pcall(function()
     obs.config_set_bool(obs.obs_frontend_get_profile_config(), "Output", "DelayEnable", false)
   end)
-  if ok then table.insert(notes, L("built-in Stream Delay turned off", "Stream Delay nativo desligado")) end
+  if ok then table.insert(notes, L("built-in Stream Delay turned off", "Stream Delay nativo desligado", "Retraso de transmisión nativo desactivado")) end
   local limits = apply_platform_limits(imported_service)
   if limits then table.insert(notes, limits) end
-  report(L("Done! ", "Pronto! ") .. table.concat(notes, "; ") .. ".")
+  report(L("Done! ", "Pronto! ", "¡Listo! ") .. table.concat(notes, "; ") .. ".")
 end
 
 local function restore_obs()
   if obs.obs_frontend_streaming_active() then
-    report(L("Stop the stream before restoring.", "Pare a live antes de restaurar."))
+    report_error(L("Stop the stream before restoring.", "Pare a live antes de restaurar.", "Detén la transmisión antes de restaurar."))
     return
   end
   if not exists(backup_path()) then
-    report(L("No original settings were saved.", "Nao ha configuracao original salva."))
+    report_error(L("No original settings were saved.", "Não há configuração original salva.", "No hay configuración original guardada."))
     return
   end
   local backup = obs.obs_data_create_from_json_file(backup_path())
@@ -428,9 +440,9 @@ local function restore_obs()
   local st = obs.obs_data_get_obj(backup, "settings")
   if t ~= "" and st ~= nil then
     set_service(t, st)
-    report(L("Original stream settings restored.", "Configuracao original de transmissao restaurada."))
+    report(L("Original stream settings restored.", "Configuração original de transmissão restaurada.", "Configuración de transmisión original restaurada."))
   else
-    report(L("The backup of the original settings is empty.", "O backup da configuracao original esta vazio."))
+    report_error(L("The backup of the original settings is empty.", "O backup da configuração original está vazio.", "La copia de seguridad de la configuración original está vacía."))
   end
   if st ~= nil then obs.obs_data_release(st) end
   obs.obs_data_release(backup)
@@ -463,8 +475,8 @@ local function show_scene(name)
   local src = obs.obs_get_source_by_name(name)
   if src == nil then
     send("scene_failed " .. name)
-    report(L("The delay scene \"", "A cena de delay \"") .. name ..
-      L("\" does not exist; the live picture was frozen instead.", "\" nao existe; congelei a imagem da live."))
+    report_error(L("The delay scene \"", "A cena de delay \"", "La escena de delay \"") .. name ..
+      L("\" does not exist; the live picture was frozen instead.", "\" não existe; congelei a imagem da live.", "\" no existe; se congeló la imagen del directo."))
     return
   end
   previous_scene = program_scene_name()
@@ -494,16 +506,17 @@ local function panic_on(mute, scene)
   if scene ~= "" then
     local src = obs.obs_get_source_by_name(scene)
     if src ~= nil then
-      panic_prev = program_scene_name()
+      -- a second panic keeps the scene to go back to (not the panic scene itself)
+      if panic_scene_name == nil then panic_prev = program_scene_name() end
       panic_scene_name = scene
       set_program(src)
       obs.obs_source_release(src)
     else
-      report(L("Panic scene \"", "Cena de pânico \"") .. scene .. L("\" not found.", "\" não encontrada."))
+      report_error(L("Panic scene \"", "Cena de pânico \"", "Escena de pánico \"") .. scene .. L("\" not found.", "\" não encontrada.", "\" no encontrada."))
     end
   end
   if mute then
-    panic_muted = {}
+    -- a second panic adds to the list, so what the first one muted is unmuted later too
     local sources = obs.obs_enum_sources()
     if sources ~= nil then
       for _, src in ipairs(sources) do
@@ -550,7 +563,7 @@ end
 local function deck_scene(name)
   local src = obs.obs_get_source_by_name(name)
   if src == nil then
-    report(L("Scene \"", "Cena \"") .. name .. L("\" not found.", "\" não encontrada."))
+    report_error(L("Scene \"", "Cena \"", "Escena \"") .. name .. L("\" not found.", "\" não encontrada.", "\" no encontrada."))
     return
   end
   set_program(src)
@@ -560,7 +573,7 @@ end
 local function deck_mute(name)
   local src = obs.obs_get_source_by_name(name)
   if src == nil then
-    report(L("Audio source \"", "Fonte de áudio \"") .. name .. L("\" not found.", "\" não encontrada."))
+    report_error(L("Audio source \"", "Fonte de áudio \"", "Fuente de audio \"") .. name .. L("\" not found.", "\" não encontrada.", "\" no encontrada."))
     return
   end
   obs.obs_source_set_muted(src, not obs.obs_source_muted(src))
@@ -624,7 +637,7 @@ local function set_fps(n)
   local busy = obs.obs_frontend_streaming_active() or obs.obs_frontend_recording_active()
   pcall(function() busy = busy or obs.obs_frontend_replay_buffer_active() or obs.obs_frontend_virtualcam_active() end)
   if busy then
-    report(L("Stop the stream and the recording before changing the frame rate.", "Pare a live e a gravação antes de mudar o FPS."))
+    report_error(L("Stop the stream and the recording before changing the frame rate.", "Pare a live e a gravação antes de mudar o FPS.", "Detén la transmisión y la grabación antes de cambiar los FPS."))
     return
   end
   local cfg = obs.obs_frontend_get_profile_config()
@@ -632,7 +645,7 @@ local function set_fps(n)
   obs.config_set_string(cfg, "Video", "FPSCommon", tostring(n))
   pcall(obs.config_save_safe, cfg, "tmp", nil)
   obs.obs_frontend_reset_video()
-  report(L("OBS now runs at ", "O OBS agora roda a ") .. n .. L(" FPS (Settings > Video).", " FPS (Configurações > Vídeo)."))
+  report(L("OBS now runs at ", "O OBS agora roda a ", "OBS ahora funciona a ") .. n .. L(" FPS (Settings > Video).", " FPS (Configurações > Vídeo).", " FPS (Configuración > Video)."))
 end
 
 -- Audio sources with their mute state, and whether OBS streams/records, for the deck keys.
@@ -712,21 +725,27 @@ end
 -- Descriptions are resolved at load time, in the configured language.
 local actions = {
   { id = "dyn_delay_toggle", en = "Dynamic Delay: toggle on/off", pt = "Delay dinâmico: ligar/desligar",
+    es = "Delay dinámico: activar/desactivar",
     cmd = function() return "toggle" end },
-  { id = "dyn_delay_on", en = "Dynamic Delay: turn on", pt = "Delay dinâmico: ligar", cmd = function() return "on" end },
+  { id = "dyn_delay_on", en = "Dynamic Delay: turn on", pt = "Delay dinâmico: ligar",
+    es = "Delay dinámico: activar", cmd = function() return "on" end },
   { id = "dyn_delay_off", en = "Dynamic Delay: turn off (back to live)", pt = "Delay dinâmico: desligar (voltar ao vivo)",
+    es = "Delay dinámico: desactivar (volver al directo)",
     cmd = function() return "off" end },
-  { id = "dyn_delay_plus", en = "Dynamic Delay: increase", pt = "Delay dinâmico: aumentar",
+  { id = "dyn_delay_plus", en = "Dynamic Delay: increase", pt = "Delay dinâmico: aumentar", es = "Delay dinámico: aumentar",
     cmd = function() return "add " .. step end },
-  { id = "dyn_delay_minus", en = "Dynamic Delay: decrease", pt = "Delay dinâmico: diminuir",
+  { id = "dyn_delay_minus", en = "Dynamic Delay: decrease", pt = "Delay dinâmico: diminuir", es = "Delay dinámico: disminuir",
     cmd = function() return "add -" .. step end },
   { id = "dyn_delay_censor", en = "Dynamic Delay: delete before it airs", pt = "Delay dinâmico: apagar antes de ir ao ar",
+    es = "Delay dinámico: borrar antes de salir al aire",
     cmd = function() return "censor" end },
   { id = "dyn_delay_replay", en = "Dynamic Delay: instant replay", pt = "Delay dinâmico: replay instantâneo",
+    es = "Delay dinámico: repetición instantánea",
     cmd = function() return "replay" end },
-  { id = "dyn_delay_clip", en = "Dynamic Delay: save clip", pt = "Delay dinâmico: salvar clipe",
+  { id = "dyn_delay_clip", en = "Dynamic Delay: save clip", pt = "Delay dinâmico: salvar clipe", es = "Delay dinámico: guardar clip",
     cmd = function() return "clip" end },
   { id = "dyn_delay_panic", en = "Dynamic Delay: panic button", pt = "Delay dinâmico: botão de pânico",
+    es = "Delay dinámico: botón de pánico",
     cmd = function() return "panic" end },
 }
 
@@ -741,18 +760,22 @@ Hotkeys in <i>Settings &gt; Hotkeys &gt; Dynamic Delay</i>.</p>
 <p>Developed by <a href="https://github.com/ragnarcb">ragnarcb</a></p>]], [[<h2>Delay dinâmico</h2>
 <p>A configuração fica no painel <b>Delay dinâmico</b> (menu <i>Docks</i>).
 Atalhos em <i>Configurações &gt; Atalhos &gt; Delay dinâmico</i>.</p>
-<p>Desenvolvido por <a href="https://github.com/ragnarcb">ragnarcb</a></p>]])
+<p>Desenvolvido por <a href="https://github.com/ragnarcb">ragnarcb</a></p>]], [[<h2>Delay dinámico</h2>
+<p>La configuración está en el panel <b>Delay dinámico</b> (menú <i>Docks</i>).
+Atajos en <i>Configuración &gt; Atajos &gt; Delay dinámico</i>.</p>
+<p>Desarrollado por <a href="https://github.com/ragnarcb">ragnarcb</a></p>]])
 end
 
 local function refresh_status()
   local r = request("status", 400)
   if r == nil then
-    r = exists(exe_path()) and L("Relay closed.", "Relay fechado.")
-      or (L("Relay not found: ", "Relay nao encontrado: ") .. exe_path())
+    r = exists(exe_path()) and L("Relay closed.", "Relay fechado.", "Relay cerrado.")
+      or (L("Relay not found: ", "Relay não encontrado: ", "Relay no encontrado: ") .. exe_path())
   end
   if not obs_configured() then
     r = r .. L("\nOBS NOT configured yet: click \"Configure OBS automatically\".",
-      "\nOBS AINDA NAO configurado: clique em \"Configurar o OBS automaticamente\".")
+      "\nOBS AINDA NÃO configurado: clique em \"Configurar o OBS automaticamente\".",
+      "\nOBS TODAVÍA NO está configurado: haz clic en \"Configurar OBS automáticamente\".")
   end
   obs.obs_data_set_string(S, "status_info", r)
 end
@@ -760,32 +783,32 @@ end
 function script_properties()
   if S then refresh_status() end
   local p = obs.obs_properties_create()
-  obs.obs_properties_add_text(p, "status_info", "Status", obs.OBS_TEXT_INFO)
-  obs.obs_properties_add_button(p, "btn_refresh", L("Refresh status", "Atualizar status"), function()
+  obs.obs_properties_add_text(p, "status_info", L("Status", "Status", "Estado"), obs.OBS_TEXT_INFO)
+  obs.obs_properties_add_button(p, "btn_refresh", L("Refresh status", "Atualizar status", "Actualizar estado"), function()
     refresh_status(); return true
   end)
-  obs.obs_properties_add_button(p, "btn_toggle", L("Toggle delay now", "Ligar/desligar delay agora"), function()
+  obs.obs_properties_add_button(p, "btn_toggle", L("Toggle delay now", "Ligar/desligar delay agora", "Activar/desactivar delay ahora"), function()
     send("toggle"); refresh_status(); return true
   end)
-  obs.obs_properties_add_button(p, "btn_configure", L("Configure OBS automatically", "Configurar o OBS automaticamente"), function()
+  obs.obs_properties_add_button(p, "btn_configure", L("Configure OBS automatically", "Configurar o OBS automaticamente", "Configurar OBS automáticamente"), function()
     configure_obs(); return true
   end)
-  obs.obs_properties_add_button(p, "btn_restore", L("Restore original OBS settings", "Restaurar configuração original do OBS"), function()
+  obs.obs_properties_add_button(p, "btn_restore", L("Restore original OBS settings", "Restaurar configuração original do OBS", "Restaurar configuración original de OBS"), function()
     restore_obs(); return true
   end)
-  obs.obs_properties_add_button(p, "btn_panel", L("Open panel in the browser", "Abrir painel no navegador"), function()
+  obs.obs_properties_add_button(p, "btn_panel", L("Open panel in the browser", "Abrir painel no navegador", "Abrir panel en el navegador"), function()
     read_ports()
     open_target("http://127.0.0.1:" .. ports.http .. "/?token=" .. api_token); return false
   end)
-  obs.obs_properties_add_int(p, "step", L("Increase/decrease step (s)", "Passo do aumentar/diminuir (s)"), 1, 120, 1)
-  obs.obs_properties_add_bool(p, "manage_relay", L("Start and close the relay with OBS", "Abrir e fechar o relay junto com o OBS"))
-  obs.obs_properties_add_button(p, "btn_restart", L("Restart relay", "Reiniciar relay"), function()
-    if not restart_relay() then obs.obs_data_set_string(S, "status_info", L("Cannot restart during a stream.", "Nao da para reiniciar durante a live.")) end
+  obs.obs_properties_add_int(p, "step", L("Increase/decrease step (s)", "Passo do aumentar/diminuir (s)", "Paso para aumentar/disminuir (s)"), 1, 120, 1)
+  obs.obs_properties_add_bool(p, "manage_relay", L("Start and close the relay with OBS", "Abrir e fechar o relay junto com o OBS", "Abrir y cerrar el relay junto con OBS"))
+  obs.obs_properties_add_button(p, "btn_restart", L("Restart relay", "Reiniciar relay", "Reiniciar relay"), function()
+    if not restart_relay() then obs.obs_data_set_string(S, "status_info", L("Cannot restart during a stream.", "Não dá para reiniciar durante a live.", "No se puede reiniciar durante la transmisión.")) end
     return true
   end)
   obs.obs_properties_add_path(p, "relay_path",
-    L("Relay executable (empty = same folder as the script)", "Executável do relay (vazio = mesma pasta do script)"),
-    obs.OBS_PATH_FILE, L("Executable (*.exe);;All (*.*)", "Executável (*.exe);;Todos (*.*)"), nil)
+    L("Relay executable (empty = same folder as the script)", "Executável do relay (vazio = mesma pasta do script)", "Ejecutable del relay (vacío = misma carpeta que el script)"),
+    obs.OBS_PATH_FILE, L("Executable (*.exe);;All (*.*)", "Executável (*.exe);;Todos (*.*)", "Ejecutable (*.exe);;Todos (*.*)"), nil)
   return p
 end
 
@@ -808,7 +831,7 @@ local function on_event(event)
   end
   if event == obs.OBS_FRONTEND_EVENT_STREAMING_STARTING and manage_relay and obs_configured() then
     if not ensure_relay(true) then
-      obs.script_log(obs.LOG_WARNING, L("relay did not start; the stream will fail to connect", "relay nao iniciou; a live vai falhar ao conectar"))
+      obs.script_log(obs.LOG_WARNING, L("relay did not start; the stream will fail to connect", "relay não iniciou; a live vai falhar ao conectar", "el relay no se inició; la transmisión no podrá conectarse"))
     end
   end
 end
@@ -817,7 +840,7 @@ function script_load(s)
   script_update(s)
   read_ports()
   for _, a in ipairs(actions) do
-    a.hk = obs.obs_hotkey_register_frontend(a.id, L(a.en, a.pt), function(pressed)
+    a.hk = obs.obs_hotkey_register_frontend(a.id, L(a.en, a.pt, a.es), function(pressed)
       if pressed then send(a.cmd()) end
     end)
     local arr = obs.obs_data_get_array(s, a.id)

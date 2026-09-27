@@ -2,6 +2,37 @@
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [SemVer](https://semver.org/).
 
+## [0.12.0] - 2026-09-27
+
+### Added
+
+- **On-screen widget while not live:** it shows the set delay before you go live, so it can be placed and styled in OBS offline ("Show it while not live too", on by default; URL parameter `show_offline=0` hides it offline).
+- **Spanish:** a third language in the panel, phone deck, on-screen widget, OBS script, relay messages, Setup and a `README.es.md`. Chat command words follow the chosen language (in Spanish `apagar` turns the delay off; in Portuguese it still deletes), English words work in every language.
+- **Auto-off timer:** "Turn off by itself" in the Delay block (15 to 120 min), `!delay 60 20m` / `!delay timer 20` in chat, `autooff` / `onfor` commands, a phone deck key, and an optional countdown on the on-screen widget. The countdown runs while the delay is on; turning it off by hand cancels it.
+- **Your own delay buttons:** up to 6 presets (Edit the delay buttons), with the memory the longest one needs at the current bitrate.
+- **Push events for bots** at `/api/events` (Server-Sent Events): delay, phase, replay, censor, clips, panic, destinations and auto-off.
+- Discord community link in the panel footer and the READMEs.
+- Facebook in the Settings platform list.
+
+### Fixed
+
+- Saving Settings could replace an account-specific Kick ingest address with the default one, and Twitch regional ingests could be taken for Kick (wrong bitrate cap). Kick and Twitch hosts are now told apart precisely, in the panel and in the OBS script.
+- **Network too slow:** the catch-up protection for a destination that cannot keep up never kicked in, so memory grew by about 1 MB/s at 8 Mbps until the link recovered. The backlog is now limited as designed.
+- A stalled platform connection now reconnects after 15 s without progress (it could hang for minutes), and a half-open OBS connection no longer blocks OBS from reconnecting.
+- Settings saved at the same time no longer overwrite each other, and partial updates (for example one feature switch) keep the other values.
+- Renaming a multistream destination kept its key only by name: destinations now have a stable id.
+- A corrupt video header could crash the clip size parser.
+- The connection-drop beep stopped working after a few drops; a second panic could leave sources muted after the panic ended; bare `!delay` in chat toggled the delay (now it does nothing, use `!delay toggle`); phone deck keys for the main destination named "principal" did not light.
+- The panel shows errors from OBS in the error style, gives up on a hung request after 5 s, and opens links in the browser when the relay cannot.
+
+### Security
+
+- The access token is compared in constant time, and the OBS script's stream import over UDP is only accepted from the script itself.
+
+### Accessibility
+
+- Phone deck keys work with the keyboard and the page can be zoomed; the connection chip is not re-announced every second; Go live / Stop buttons name their destination.
+
 ## [0.11.1] - 2026-09-27
 
 ### Changed

@@ -27,7 +27,7 @@ use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use crate::config::Config;
 use crate::engine::{Engine, GrowMode, OutPacket, SceneEvent, TsUnwrapper};
 use crate::flv::Kind;
-use crate::status::{Bridge, Cmd, ObsAction, OutputStatus, Shared, Status, UpstreamState};
+use crate::status::{AutoOff, Bridge, Cmd, ObsAction, OutputStatus, Shared, Status, UpstreamState};
 use crate::upstream::{Dest, UpMsg};
 
 pub enum EngineMsg {
@@ -80,7 +80,7 @@ fn init_logging(config: &Path) {
 
 fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    // `--lang en|pt` picks the language of the installer texts (the Setup passes the one chosen there)
+    // `--lang en|pt|es` picks the language of the installer texts (the Setup passes the one chosen there)
     if let Some(l) = args.iter().position(|a| a == "--lang").and_then(|i| args.get(i + 1)) {
         i18n::set(i18n::Lang::parse(l));
     }
@@ -117,6 +117,7 @@ async fn relay() -> Result<()> {
                 t!(
                     "obs-dynamic-delay is already running (port {} in use): {e}",
                     "obs-dynamic-delay ja esta rodando (porta {} ocupada): {e}",
+                    "obs-dynamic-delay ya se está ejecutando (puerto {} en uso): {e}",
                     cfg.udp_listen
                 )
             );
@@ -138,6 +139,7 @@ async fn relay() -> Result<()> {
         config_path: path.clone(),
         bridge: Mutex::new(Bridge::default()),
         update_now: Default::default(),
+        events: tokio::sync::broadcast::channel(256).0,
     });
     let (tx, rx) = mpsc::unbounded_channel();
 
@@ -159,7 +161,7 @@ async fn relay() -> Result<()> {
 /// whether it goes live together with the stream.
 fn destinations(cfg: &Config, obs_key: &str) -> Vec<(Dest, bool)> {
     let main_key = if cfg.stream_key.is_empty() { obs_key.to_string() } else { cfg.stream_key.clone() };
-    let mut v = vec![(Dest { name: t!("Main", "Principal"), url: cfg.upstream_url.clone(), key: main_key }, true)];
+    let mut v = vec![(Dest { name: t!("Main", "Principal", "Principal"), url: cfg.upstream_url.clone(), key: main_key }, true)];
     let extras = if cfg.features.multistream { cfg.destinations.as_slice() } else { &[] };
     for d in extras.iter().filter(|d| d.enabled && !d.url.is_empty()) {
         let name = if d.name.trim().is_empty() { d.url.clone() } else { d.name.clone() };
@@ -344,6 +346,9 @@ async fn run_engine(cfg: Config, mut rx: UnboundedReceiver<EngineMsg>, shared: A
     let mut in_meter = Instant::now();
     // newest output timestamp, where a destination started mid-stream begins
     let mut last_out_ts = 0u32;
+    let mut auto_off = AutoOff::default();
+    // last published status, compared with the next one for the push events
+    let mut last_status: Option<Status> = None;
 
     let target = |enabled: bool, delay: u32| Duration::from_secs(if enabled { delay as u64 } else { 0 });
     engine.set_target(target(enabled, delay));
@@ -384,6 +389,7 @@ async fn run_engine(cfg: Config, mut rx: UnboundedReceiver<EngineMsg>, shared: A
                         if outputs.is_none() {
                             let c = shared.config.lock().unwrap().clone();
                             if c.start_enabled {
+                                auto_off.delay_changed(enabled, true, Instant::now());
                                 enabled = true;
                                 engine.set_target(target(enabled, delay));
                             }
@@ -428,13 +434,25 @@ async fn run_engine(cfg: Config, mut rx: UnboundedReceiver<EngineMsg>, shared: A
                 let now = Instant::now();
                 let c = shared.config.lock().unwrap().clone();
                 if let Some(name) = disabled_feature(&c, cmd, panic) {
-                    shared.event("warn", t!("\"{name}\" is turned off (Features and panel).", "\"{name}\" está desativado (Recursos e painel)."));
+                    shared.event("warn", t!("\"{name}\" is turned off (Features and panel).", "\"{name}\" está desativado (Recursos e painel).", "\"{name}\" está desactivado (Funciones y panel)."));
                     continue;
                 }
+                let was_enabled = enabled;
                 match cmd {
                     Cmd::On => enabled = true,
                     Cmd::Off => enabled = false,
                     Cmd::Toggle => enabled = !enabled,
+                    Cmd::OnFor(_, secs) => {
+                        enabled = true;
+                        if let Some(s) = secs {
+                            delay = s.min(c.max_delay_seconds);
+                        }
+                    }
+                    Cmd::AutoOff(minutes) => {
+                        auto_off.set(minutes, enabled, now);
+                        announce_auto_off(&shared, auto_off.minutes(), enabled);
+                        continue;
+                    }
                     Cmd::Set(s) => delay = s.min(c.max_delay_seconds),
                     Cmd::Add(d) => delay = (delay as i64 + d).clamp(0, c.max_delay_seconds as i64) as u32,
                     Cmd::Censor(secs) => {
@@ -446,12 +464,12 @@ async fn run_engine(cfg: Config, mut rx: UnboundedReceiver<EngineMsg>, shared: A
                         let busy = engine.is_adjusting();
                         let got = engine.replay(now, Duration::from_secs(secs as u64));
                         if busy {
-                            shared.event("warn", t!("Wait: the delay is still being adjusted.", "Aguarde: o delay ainda está sendo ajustado."));
+                            shared.event("warn", t!("Wait: the delay is still being adjusted.", "Aguarde: o delay ainda está sendo ajustado.", "Espera: el delay todavía se está ajustando."));
                         } else if got.is_zero() {
-                            shared.event("warn", t!("Nothing to replay yet.", "Ainda não há nada para o replay."));
+                            shared.event("warn", t!("Nothing to replay yet.", "Ainda não há nada para o replay.", "Todavía no hay nada para repetir."));
                         } else {
                             let s = got.as_secs_f64();
-                            shared.event("ok", t!("Replaying the last {s:.0}s on air.", "Replay dos últimos {s:.0}s no ar."));
+                            shared.event("ok", t!("Replaying the last {s:.0}s on air.", "Replay dos últimos {s:.0}s no ar.", "Repitiendo los últimos {s:.0}s al aire."));
                         }
                         continue;
                     }
@@ -473,10 +491,10 @@ async fn run_engine(cfg: Config, mut rx: UnboundedReceiver<EngineMsg>, shared: A
                             if c.panic_censor {
                                 censor(&mut engine, &shared, now, c.censor_seconds);
                             }
-                            shared.event("error", t!("PANIC: stream covered.", "PÂNICO: live protegida."));
+                            shared.event("error", t!("PANIC: stream covered.", "PÂNICO: live protegida.", "PÁNICO: transmisión protegida."));
                         } else {
                             shared.bridge.lock().unwrap().pending.push_back(ObsAction::Unpanic);
-                            shared.event("ok", t!("Panic mode off.", "Modo pânico desligado."));
+                            shared.event("ok", t!("Panic mode off.", "Modo pânico desligado.", "Modo pánico desactivado."));
                         }
                         continue;
                     }
@@ -488,7 +506,7 @@ async fn run_engine(cfg: Config, mut rx: UnboundedReceiver<EngineMsg>, shared: A
                     }
                     Cmd::OutputStart(id) | Cmd::OutputStop(id) | Cmd::OutputToggle(id) => {
                         let Some(o) = &mut outputs else {
-                            shared.event("warn", t!("Start the stream in OBS first.", "Inicie a live no OBS primeiro."));
+                            shared.event("warn", t!("Start the stream in OBS first.", "Inicie a live no OBS primeiro.", "Inicia la transmisión en OBS primero."));
                             continue;
                         };
                         let Some(i) = o.index(id) else { continue };
@@ -501,10 +519,10 @@ async fn run_engine(cfg: Config, mut rx: UnboundedReceiver<EngineMsg>, shared: A
                         if start {
                             let p = primer(&engine, &last_metadata, last_out_ts);
                             o.start(i, &shared, &p);
-                            shared.event("ok", t!("{name}: going live.", "{name}: entrando ao vivo."));
+                            shared.event("ok", t!("{name}: going live.", "{name}: entrando ao vivo.", "{name}: entrando en directo."));
                         } else {
                             o.stop(i);
-                            shared.event("ok", t!("{name}: stopped.", "{name}: parado."));
+                            shared.event("ok", t!("{name}: stopped.", "{name}: parado.", "{name}: detenido."));
                         }
                         o.sync_status(&shared);
                         continue;
@@ -522,8 +540,13 @@ async fn run_engine(cfg: Config, mut rx: UnboundedReceiver<EngineMsg>, shared: A
                 if force_on {
                     enabled = true;
                 }
+                auto_off.delay_changed(was_enabled, enabled, now);
+                if let Cmd::OnFor(minutes, _) = cmd {
+                    auto_off.set(minutes, true, now);
+                    announce_auto_off(&shared, auto_off.minutes(), true);
+                }
                 log::info!("delay {} ({}s)", if enabled { "ON" } else { "OFF" }, delay);
-                if matches!(cmd, Cmd::Set(_) | Cmd::Add(_)) {
+                if matches!(cmd, Cmd::Set(_) | Cmd::Add(_) | Cmd::OnFor(_, Some(_))) {
                     let changed = {
                         let mut c = shared.config.lock().unwrap();
                         std::mem::replace(&mut c.delay_seconds, delay) != delay
@@ -536,6 +559,15 @@ async fn run_engine(cfg: Config, mut rx: UnboundedReceiver<EngineMsg>, shared: A
             }
             _ = tick.tick() => {
                 let now = Instant::now();
+                let armed = auto_off.minutes();
+                if auto_off.due(now) && enabled {
+                    // same as "off"
+                    enabled = false;
+                    engine.set_target(target(enabled, delay));
+                    log::info!("delay OFF ({delay}s), auto-off after {armed} min");
+                    shared.event("ok", t!("Auto-off: the delay was turned off after {armed} min.", "Desligou sozinho: o delay foi desligado depois de {armed} min.", "Apagado automático: el delay se desactivó después de {armed} min."));
+                    shared.push(serde_json::json!({ "type": "auto_off", "minutes": armed, "delay_seconds": delay }));
+                }
                 let (mode, scene, history) = {
                     let c = shared.config.lock().unwrap();
                     (GrowMode::parse(&c.grow_mode), c.delay_scene.clone(), Duration::from_secs(c.history_seconds(delay)))
@@ -603,6 +635,17 @@ async fn run_engine(cfg: Config, mut rx: UnboundedReceiver<EngineMsg>, shared: A
                         in_meter = Instant::now();
                     }
                     st.health.uptime_s = stream_started.map_or(0, |t| t.elapsed().as_secs());
+                    st.auto_off_s = auto_off.seconds_left(now);
+                    st.auto_off_minutes = auto_off.minutes();
+                    // push events: what changed since the last snapshot, wherever it was changed
+                    let snapshot = st.clone();
+                    drop(st);
+                    if let Some(prev) = &last_status {
+                        for ev in status::status_events(prev, &snapshot) {
+                            shared.push(ev);
+                        }
+                    }
+                    last_status = Some(snapshot);
                 }
             }
         }
@@ -612,11 +655,26 @@ async fn run_engine(cfg: Config, mut rx: UnboundedReceiver<EngineMsg>, shared: A
 fn censor(engine: &mut Engine, shared: &Shared, now: Instant, secs: u32) {
     let removed = engine.censor(now, Duration::from_secs(secs as u64));
     if removed.is_zero() {
-        shared.event("warn", t!("Nothing to delete: turn the delay on first.", "Nada para apagar: ligue o delay antes."));
+        shared.event("warn", t!("Nothing to delete: turn the delay on first.", "Nada para apagar: ligue o delay antes.", "Nada que borrar: activa el delay primero."));
     } else {
         let s = removed.as_secs_f64();
-        shared.event("ok", t!("Deleted the last {s:.1}s before they aired.", "Apagados os últimos {s:.1}s antes de irem ao ar."));
+        shared.event("ok", t!("Deleted the last {s:.1}s before they aired.", "Apagados os últimos {s:.1}s antes de irem ao ar.", "Se borraron los últimos {s:.1}s antes de salir al aire."));
+        shared.push(serde_json::json!({ "type": "censor", "seconds": (s * 10.0).round() / 10.0 }));
     }
+}
+
+/// Tells the panel what the auto-off timer does now.
+fn announce_auto_off(shared: &Shared, minutes: u32, enabled: bool) {
+    let text = match (minutes, enabled) {
+        (0, _) => t!("Auto-off canceled.", "Desligamento automático cancelado.", "Apagado automático cancelado."),
+        (m, true) => t!("The delay turns off by itself in {m} min.", "O delay desliga sozinho em {m} min.", "El delay se desactiva solo en {m} min."),
+        (m, false) => t!(
+            "The delay turns off by itself {m} min after it is turned on.",
+            "O delay desliga sozinho {m} min depois de ser ligado.",
+            "El delay se desactiva solo {m} min después de activarlo."
+        ),
+    };
+    shared.event("ok", text);
 }
 
 /// A frame count over about a second jitters (29.8, 60.2...): show the usual rate it is close to.
@@ -644,7 +702,7 @@ fn save_clip(
     fps: Option<f64>,
 ) {
     let Some(clip) = engine.snapshot(now, Duration::from_secs(secs as u64), aired_only) else {
-        shared.event("warn", t!("Nothing to clip yet.", "Ainda não há nada para o clipe."));
+        shared.event("warn", t!("Nothing to clip yet.", "Ainda não há nada para o clipe.", "Todavía no hay nada para el clip."));
         return;
     };
     let shared = shared.clone();
@@ -652,9 +710,9 @@ fn save_clip(
         Ok(path) => {
             let p = path.display().to_string();
             shared.status.lock().unwrap().last_clip = Some(p.clone());
-            shared.event("ok", t!("Clip saved: {p}", "Clipe salvo: {p}"));
+            shared.event("ok", t!("Clip saved: {p}", "Clipe salvo: {p}", "Clip guardado: {p}"));
         }
-        Err(e) => shared.event("error", t!("Could not save the clip: {e:#}", "Não deu para salvar o clipe: {e:#}")),
+        Err(e) => shared.event("error", t!("Could not save the clip: {e:#}", "Não deu para salvar o clipe: {e:#}", "No se pudo guardar el clip: {e:#}")),
     });
 }
 
@@ -671,11 +729,11 @@ fn disabled_feature(c: &Config, cmd: Cmd, panic_on: bool) -> Option<String> {
         _ => false,
     };
     off.then(|| match cmd {
-        Cmd::Censor(_) => t!("Delete before it airs", "Apagar antes de ir ao ar"),
-        Cmd::Replay(_) => t!("Instant replay", "Replay instantâneo"),
-        Cmd::Clip(_) => t!("Clips", "Clipes"),
-        Cmd::Panic => t!("Panic button", "Botão de pânico"),
-        _ => t!("Connection drop protection", "Proteção contra queda"),
+        Cmd::Censor(_) => t!("Delete before it airs", "Apagar antes de ir ao ar", "Borrar antes de salir al aire"),
+        Cmd::Replay(_) => t!("Instant replay", "Replay instantâneo", "Repetición instantánea"),
+        Cmd::Clip(_) => t!("Clips", "Clipes", "Clips"),
+        Cmd::Panic => t!("Panic button", "Botão de pânico", "Botón de pánico"),
+        _ => t!("Connection drop protection", "Proteção contra queda", "Protección contra caídas"),
     })
 }
 
@@ -693,6 +751,6 @@ fn scene_rule(shared: &Shared, scene: &str) -> Option<(Cmd, bool)> {
         a => (Cmd::Set(a.strip_prefix("set:")?.parse().ok()?), true),
     };
     drop(c);
-    shared.event("ok", t!("Scene \"{scene}\": delay rule applied.", "Cena \"{scene}\": regra de delay aplicada."));
+    shared.event("ok", t!("Scene \"{scene}\": delay rule applied.", "Cena \"{scene}\": regra de delay aplicada.", "Escena \"{scene}\": regla de delay aplicada."));
     Some(out)
 }

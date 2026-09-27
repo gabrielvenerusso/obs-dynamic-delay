@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -40,6 +40,7 @@
     display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; overflow: hidden;
     transition: transform .08s, background .18s, border-color .18s, box-shadow .18s; cursor: pointer; }
   .key:active, .key.down { transform: scale(.95); }
+  .key:focus-visible { outline: 2px solid var(--c); outline-offset: 2px; }
   .key .icon { color: var(--c); display: grid; place-items: center; }
   .key .icon .i { width: clamp(26px, 9vw, 44px); height: clamp(26px, 9vw, 44px); }
   .key .label { font-size: clamp(11px, 3.4vw, 15px); font-weight: 650; text-align: center; padding: 0 6px; overflow-wrap: anywhere; line-height: 1.2; }
@@ -72,6 +73,8 @@
 <div id="toast" role="status" aria-live="polite"></div>
 <script>
 "use strict";
+// "main"/"principal" (any case) or empty is the main destination, as in the relay
+const isMain = (a) => ["", "main", "principal"].includes((a || "").trim().toLowerCase());
 const TOKEN = new URLSearchParams(location.search).get("token") || "";
 const TEXT = {
   en: {
@@ -79,9 +82,10 @@ const TEXT = {
     hold: "hold", holdToConfirm: "Hold the key to confirm", off: "Phone deck is turned off (Features and panel).", noToken: "Open the deck from the QR code in the OBS panel.",
     keys: {
       "delay.toggle": "Delay", "delay.on": "Delay on", "delay.off": "Go live", "delay.set": (a) => `Delay ${a}s`, "delay.add": (a) => (a.startsWith("-") ? `−${a.slice(1)}s` : `+${a}s`),
+      "delay.timer": (a) => (+a > 0 ? `Delay ${a} min` : "Timer off"),
       censor: "Delete", replay: "Replay", clip: "Clip", panic: "Panic", catchup: "Catch up",
       "obs.scene": (a) => a || "Scene", "obs.mute": (a) => a || "Audio", "obs.stream": "Stream", "obs.record": "Record",
-      "dest.toggle": (a) => (!a || a === "main" ? "Main" : a),
+      "dest.toggle": (a) => (isMain(a) ? "Main" : a),
     },
     on: "ON", offWord: "OFF", muted: "muted", streaming: "on air", recording: "recording", destOff: "stopped",
   },
@@ -90,11 +94,24 @@ const TEXT = {
     hold: "segure", holdToConfirm: "Segure o botão para confirmar", off: "O deck no celular está desativado (Recursos e painel).", noToken: "Abra o deck pelo QR code do painel do OBS.",
     keys: {
       "delay.toggle": "Delay", "delay.on": "Ligar delay", "delay.off": "Ao vivo", "delay.set": (a) => `Delay ${a}s`, "delay.add": (a) => (a.startsWith("-") ? `−${a.slice(1)}s` : `+${a}s`),
+      "delay.timer": (a) => (+a > 0 ? `Delay ${a} min` : "Sem timer"),
       censor: "Apagar", replay: "Replay", clip: "Clipe", panic: "Pânico", catchup: "Alcançar",
       "obs.scene": (a) => a || "Cena", "obs.mute": (a) => a || "Áudio", "obs.stream": "Transmitir", "obs.record": "Gravar",
-      "dest.toggle": (a) => (!a || a === "main" ? "Principal" : a),
+      "dest.toggle": (a) => (isMain(a) ? "Principal" : a),
     },
     on: "LIGADO", offWord: "DESLIGADO", muted: "mudo", streaming: "no ar", recording: "gravando", destOff: "parado",
+  },
+  es: {
+    live: "EN DIRECTO", delayed: "DELAY", adjusting: "AJUSTANDO", replay: "REPLAY", panic: "PÁNICO", noLive: "SIN DIRECTO", offline: "SIN CONEXIÓN",
+    hold: "mantén", holdToConfirm: "Mantén presionado el botón para confirmar", off: "El deck en el celular está desactivado (Funciones y panel).", noToken: "Abre el deck con el código QR del panel de OBS.",
+    keys: {
+      "delay.toggle": "Delay", "delay.on": "Activar delay", "delay.off": "En directo", "delay.set": (a) => `Delay ${a}s`, "delay.add": (a) => (a.startsWith("-") ? `−${a.slice(1)}s` : `+${a}s`),
+      "delay.timer": (a) => (+a > 0 ? `Delay ${a} min` : "Sin temporizador"),
+      censor: "Borrar", replay: "Replay", clip: "Clip", panic: "Pánico", catchup: "Alcanzar",
+      "obs.scene": (a) => a || "Escena", "obs.mute": (a) => a || "Audio", "obs.stream": "Transmitir", "obs.record": "Grabar",
+      "dest.toggle": (a) => (isMain(a) ? "Principal" : a),
+    },
+    on: "ACTIVO", offWord: "INACTIVO", muted: "silenciado", streaming: "al aire", recording: "grabando", destOff: "detenido",
   },
 };
 // Phosphor Icons (MIT, phosphoricons.com), fill weight, viewBox 0 0 256 256
@@ -117,19 +134,19 @@ const SVG = {
 };
 const svg = (name) => `<svg class="i" viewBox="0 0 256 256" aria-hidden="true">${SVG[name] || SVG.dot}</svg>`;
 const ICONS = {
-  "delay.toggle": "timer", "delay.on": "timer", "delay.off": "live", "delay.set": "timer", "delay.add": "plusminus",
+  "delay.toggle": "timer", "delay.on": "timer", "delay.off": "live", "delay.set": "timer", "delay.add": "plusminus", "delay.timer": "timer",
   censor: "scissors", replay: "replay", clip: "clapper", panic: "siren", catchup: "fastforward",
   "obs.scene": "scene", "obs.mute": "mic", "obs.stream": "stream", "obs.record": "record", "dest.toggle": "live",
 };
 const DEFAULT_COLOR = {
-  "delay.toggle": "orange", "delay.on": "orange", "delay.off": "green", "delay.set": "orange", "delay.add": "grey",
+  "delay.toggle": "orange", "delay.on": "orange", "delay.off": "green", "delay.set": "orange", "delay.add": "grey", "delay.timer": "orange",
   censor: "red", replay: "blue", clip: "blue", panic: "red", catchup: "blue",
   "obs.scene": "blue", "obs.mute": "red", "obs.stream": "red", "obs.record": "red", "dest.toggle": "green",
 };
 // keys that change what the whole audience sees: hold to confirm
 const HOLD = { "obs.stream": 800, "obs.record": 800, "dest.toggle": 800 };
 
-let lang = /^pt/i.test(navigator.language) ? "pt" : "en";
+let lang = (/^(pt|es)/i.exec(navigator.language || "") || [, "en"])[1].toLowerCase();
 const T = () => TEXT[lang] || TEXT.en;
 const $ = (id) => document.getElementById(id);
 let cfg = null, status = null, layoutKey = "";
@@ -161,6 +178,11 @@ function stateOf(k, s) {
     case "delay.on": return { lit: s.enabled };
     case "delay.off": return { lit: !s.enabled };
     case "delay.set": return { lit: s.enabled && String(s.delay_seconds) === k.arg };
+    case "delay.timer": {
+      // time left on the auto-off timer
+      const left = s.auto_off_s;
+      return { lit: left != null, sub: left != null ? `${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}` : "" };
+    }
     case "panic": return { lit: s.panic, sub: s.panic ? T().on : "" };
     case "replay": return { lit: !!(s.engine && s.engine.replaying) };
     case "catchup": {
@@ -175,8 +197,9 @@ function stateOf(k, s) {
     case "obs.stream": return { lit: !!o.streaming, sub: o.streaming ? T().streaming : "" };
     case "obs.record": return { lit: !!o.recording, sub: o.recording ? T().recording : "" };
     case "dest.toggle": {
-      const main = !k.arg || k.arg === "main";
-      const d = (s.outputs || []).find((x) => (main ? x.id === 0 : x.name.toLowerCase() === k.arg.toLowerCase()));
+      const main = isMain(k.arg);
+      const arg = (k.arg || "").trim().toLowerCase();
+      const d = (s.outputs || []).find((x) => (main ? x.id === 0 : x.name.toLowerCase() === arg));
       return { lit: !!(s.engine && d && d.running), sub: s.engine && d ? (d.running ? T().streaming : T().destOff) : "" };
     }
     default: return { lit: false };
@@ -203,6 +226,7 @@ function buildGrid() {
     el.style.setProperty("--c", `var(--${c})`);
     el.style.setProperty("--cs", `var(--${c}-soft)`);
     el.setAttribute("role", "button");
+    el.tabIndex = 0;
     el.innerHTML = '<span class="icon"></span><span class="label"></span><span class="sub"></span><span class="hold"></span>';
     el.querySelector(".label").textContent = labelOf(k);
     el.querySelector(".icon").innerHTML = svg(ICONS[k.action]);
@@ -226,6 +250,10 @@ function buildGrid() {
     } else {
       el.addEventListener("pointerdown", (e) => { e.preventDefault(); press(i, el); });
     }
+    // keyboard (and switch access): Enter or Space presses the key; hold keys press at once, as a deliberate action
+    el.addEventListener("keydown", (e) => {
+      if ((e.key === "Enter" || e.key === " ") && !e.repeat) { e.preventDefault(); press(i, el); }
+    });
     return el;
   }));
 }
@@ -241,7 +269,7 @@ function render(s) {
   else if (e.phase === "live") { pill.className = "pill live"; pill.textContent = T().live; }
   else { pill.className = "pill delayed"; pill.textContent = T().delayed; }
   const secs = e ? e.current_ms / 1000 : 0;
-  $("secs").textContent = (lang === "pt" ? secs.toFixed(1).replace(".", ",") : secs.toFixed(1)) + " s";
+  $("secs").textContent = (lang === "pt" || lang === "es" ? secs.toFixed(1).replace(".", ",") : secs.toFixed(1)) + " s";
   $("conn").className = "ok";
   const keys = document.querySelectorAll(".key");
   cfg.deck.keys.forEach((k, i) => {
@@ -261,7 +289,7 @@ async function loadConfig() {
   if (c.ok === false) throw new Error(c.error);
   cfg = c;
   if (TEXT[c.language]) lang = c.language;
-  document.documentElement.lang = lang === "pt" ? "pt-BR" : "en";
+  document.documentElement.lang = lang === "pt" ? "pt-BR" : lang;
   if (!c.features.phone) { $("grid").replaceChildren(Object.assign(document.createElement("div"), { className: "msg", textContent: T().off })); layoutKey = ""; return; }
   const key = JSON.stringify(c.deck) + lang;
   if (key !== layoutKey) { layoutKey = key; buildGrid(); }

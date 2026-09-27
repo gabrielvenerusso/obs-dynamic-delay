@@ -256,7 +256,7 @@
   <div id="modules"></div>
   <details class="card" id="settingsCard"></details>
   <details class="card" id="customizeCard"></details>
-  <footer class="credit"><span id="ver"></span><span><span data-t="developedBy"></span> <a id="author" href="https://github.com/ragnarcb" target="_blank" rel="noopener">ragnarcb</a></span><span class="sep">·</span><a id="support" href="#" data-t="support"></a></footer>
+  <footer class="credit"><span id="ver"></span><span><span data-t="developedBy"></span> <a id="author" href="https://github.com/ragnarcb" target="_blank" rel="noopener">ragnarcb</a></span><span class="sep">·</span><a id="discord" href="https://discord.gg/crctbnQ2f8">Discord</a><span class="sep">·</span><a id="support" href="#" data-t="support"></a></footer>
 </main>
 <div id="toast" class="toast" role="status" aria-live="polite"></div>
 <script>
@@ -266,17 +266,28 @@ const TOKEN = window.DD_TOKEN || new URLSearchParams(location.search).get("token
 const URLS = { twitch: "rtmp://live.twitch.tv/app", youtube: "rtmp://a.rtmp.youtube.com/live2",
   kick: "rtmps://fa723fc1b171.global-contribute.live-video.net:443/app", facebook: "rtmps://live-api-s.facebook.com:443/rtmp/" };
 const PLATFORM_NAMES = { twitch: "Twitch", youtube: "YouTube", kick: "Kick", facebook: "Facebook" };
-const platformOfUrl = (u) => Object.keys(URLS).find((k) => URLS[k] === u) || (/kick|live-video\.net/.test(u || "") && !/^rtmps?:\/\/ingest\./.test(u) ? "kick" : "custom");
+const hostOf = (u) => (((u || "").trim().match(/^\w+:\/\/([^/:?#]+)/) || [])[1] || "").toLowerCase();
+// Kick ingests are "<12 hex>.global-contribute.live-video.net"; Twitch uses live-video.net
+// too ("ingest.global-contribute...", regional "*.contribute..."), so the domain alone is not enough.
+const isKickHost = (host) => /^[0-9a-f]{12}\.global-contribute\.live-video\.net$/.test(host) || /(^|\.)kick\.com$/.test(host);
+const isTwitchHost = (host) => !isKickHost(host) && /(^|\.)twitch\.tv$|contribute\.live-video\.net$/.test(host);
+// Platform of a URL for the pickers: a known address, any Kick ingest (Kick keeps its own URL), else "custom".
+const platformOfUrl = (u) => Object.keys(URLS).find((k) => URLS[k] === u) || (isKickHost(hostOf(u)) ? "kick" : "custom");
 
 // ---------------------------------------------------------------- texts
 const TEXT = {
   en: {
     appName: "Dynamic Delay", developedBy: "Developed by", support: "Support the project", noToken: "Missing access token. Open the panel from OBS (Docks > Dynamic Delay) or the script's \"Open panel\" button.",
     relayOff: "RELAY CLOSED", relayOffHint: "opens together with OBS", relayClosed: "The relay is closed", relayClosedHint: "It opens together with OBS. Start OBS with the Dynamic Delay script loaded.",
+    noAnswer: "The relay did not answer. Try again.", openFailed: "Could not open it on this PC.",
     noLive: "NOT LIVE", live: "LIVE", adjusting: "ADJUSTING", delayed: "DELAY", replay: "REPLAY", panicPill: "PANIC",
     phases: { live: "live", delayed: "delayed", growing: "waiting for a keyframe", filling: "holding a frame, applying delay", shrinking: "cutting back to live" },
     delayForViewers: "delay for viewers", setTo: "set to", toggleOff: "Turn delay off (back to live)", toggleOn: (s) => `Turn on ${s}s delay`,
     setPreset: (s) => `Set the delay to ${s} seconds`, addPreset: (s) => (s < 0 ? `Remove ${-s} seconds` : `Add ${s} seconds`),
+    autoOff: "Auto-off", autoOffNone: "never", autoOffIn: (t) => `Turns off by itself in ${t}`, autoOffArmed: (m) => `Turns off by itself ${m} min after it is turned on`,
+    presetsEdit: "Edit the delay buttons", presetsLabel: "Delay buttons (seconds, comma separated, up to 6)",
+    presetsHint: "Many esports tournaments require 120 to 300 s of delay.",
+    presetsMem: (secs, mb, kbps, typical) => `The longest (${secs} s) keeps about ${mb} MB in memory at ${kbps} kbps${typical ? " (typical bitrate)" : ""}.`,
     obsNotUsing: "OBS is not streaming through the dynamic delay yet.", configureObs: "Configure OBS automatically",
     keyMissing: "The stream key is missing. Fill it in under Settings.", update: (v) => `Version ${v} is available.`, download: "Download",
     updates: "Updates", updCheck: "Check now", updChecking: "Checking GitHub...", updOff: "Update notice is off (Features and panel).",
@@ -301,8 +312,8 @@ const TEXT = {
     ovAdd: "Add to the current OBS scene", ovLink: "Browser Source link", ovPreview: "Preview", ovReal: "Now",
     ovStates: { on: "On", adjusting: "Adjusting", replay: "Replay", off: "Off" },
     ovStyle: "Style", ovStyles: { pill: "Pill", card: "Card", minimal: "Text only" }, ovTheme: "Theme", ovThemes: { dark: "Dark", light: "Light", outline: "Outline" },
-    ovShow: "Show", ovDot: "Dot", ovLabel: "Text", ovSecs: "Seconds", ovProgress: "Progress line",
-    ovHide: "Hide while the delay is off", ovSize: "Size", ovAlign: "Alignment", ovAligns: { left: "Left", center: "Center", right: "Right" },
+    ovShow: "Show", ovDot: "Dot", ovLabel: "Text", ovSecs: "Seconds", ovProgress: "Progress line", ovTimer: "Auto-off time left",
+    ovOffline: "Show it while not live too (to place and style it)", ovHide: "Hide while the delay is off (when live)", ovSize: "Size", ovAlign: "Alignment", ovAligns: { left: "Left", center: "Center", right: "Right" },
     ovFont: "Font", ovFonts: { sans: "Sans", mono: "Mono", condensed: "Condensed" }, ovFormat: "Time", ovColor: "Color",
     ovTexts: "Texts (empty = default)", ovDefaults: { on: "Delay", adjusting: "Adjusting", replay: "Replay", off: "No delay" },
     ovHint: "The widget is an OBS Browser Source: move and resize it like any source. Changes here show up on stream right away. For a second look, add URL parameters to its link (for example ?style=minimal&scale=150) or use the Custom CSS field of the source.",
@@ -326,12 +337,12 @@ const TEXT = {
     remove: "Remove", save: "Save", saved: "Saved.", savedNext: "Saved. Destination changes apply to the next stream.",
     addRule: "Add rule", actOn: "turn on", actOff: "turn off", actSet: "turn on with", rulesHint: "When one of these scenes goes on air, the delay changes by itself.",
     chatOn: "Listen to chat commands", channel: "Channel", channelHint: "your channel name, e.g. ragnar_cb", allow: "Who can use them", allowB: "only me", allowM: "me and mods", allowV: "me, mods and VIPs", prefix: "Command",
-    chatHint: (p) => `In chat: ${p} on · ${p} off · ${p} 60 · ${p} censor · ${p} replay · ${p} clip · ${p} panic`,
+    chatHint: (p) => `In chat: ${p} on · ${p} off · ${p} 60 · ${p} 60 20m (on for 20 minutes) · ${p} timer 20 · ${p} censor · ${p} replay · ${p} clip · ${p} panic`,
     openDeck: "Open the deck on this PC (tablet or second monitor)", deckKeys: "Deck keys", deckColumns: "Columns", addKey: "Add key",
-    deckDefaults: "Restore the default keys", keyLabel: "Text on the key (empty = automatic)", noAudio: "(open OBS to list the audio sources)",
+    deckDefaults: "Restore the default keys", keyLabel: "Text on the key (empty = automatic)", minutes: "Minutes (empty = cancel the timer)", noAudio: "(open OBS to list the audio sources)",
     deckActions: {
       "delay.toggle": "Delay: toggle", "delay.on": "Delay: turn on", "delay.off": "Delay: off (back to live)", "delay.set": "Delay: turn on with N seconds",
-      "delay.add": "Delay: add/remove seconds", censor: "Delete before it airs", replay: "Instant replay", clip: "Save clip", panic: "Panic button",
+      "delay.add": "Delay: add/remove seconds", "delay.timer": "Delay: on for N minutes (auto-off)", censor: "Delete before it airs", replay: "Instant replay", clip: "Save clip", panic: "Panic button",
       catchup: "Catch up after a drop", "obs.scene": "OBS: switch to scene", "obs.mute": "OBS: mute/unmute audio source",
       "obs.stream": "OBS: start/stop streaming (hold)", "obs.record": "OBS: start/stop recording (hold)",
       "dest.toggle": "Multistream: start/stop a destination (hold)",
@@ -355,10 +366,15 @@ const TEXT = {
   pt: {
     appName: "Delay dinâmico", developedBy: "Desenvolvido por", support: "Apoiar o projeto", noToken: "Falta o token de acesso. Abra o painel pelo OBS (Docks > Delay dinâmico) ou pelo botão \"Abrir painel\" do script.",
     relayOff: "RELAY FECHADO", relayOffHint: "abre junto com o OBS", relayClosed: "O relay está fechado", relayClosedHint: "Ele abre junto com o OBS. Abra o OBS com o script do Delay dinâmico carregado.",
+    noAnswer: "O relay não respondeu. Tente de novo.", openFailed: "Não deu para abrir neste PC.",
     noLive: "SEM LIVE", live: "AO VIVO", adjusting: "AJUSTANDO", delayed: "DELAY", replay: "REPLAY", panicPill: "PÂNICO",
     phases: { live: "ao vivo", delayed: "com delay", growing: "aguardando keyframe", filling: "congelado, aplicando delay", shrinking: "cortando para o vivo" },
     delayForViewers: "atraso para o público", setTo: "configurado", toggleOff: "Desligar delay (voltar ao vivo)", toggleOn: (s) => `Ligar delay de ${s}s`,
     setPreset: (s) => `Colocar o delay em ${s} segundos`, addPreset: (s) => (s < 0 ? `Tirar ${-s} segundos` : `Somar ${s} segundos`),
+    autoOff: "Desligar sozinho", autoOffNone: "nunca", autoOffIn: (t) => `Desliga sozinho em ${t}`, autoOffArmed: (m) => `Desliga sozinho ${m} min depois de ligar`,
+    presetsEdit: "Editar os botões de delay", presetsLabel: "Botões de delay (segundos, separados por vírgula, até 6)",
+    presetsHint: "Muitos campeonatos de esports exigem de 120 a 300 s de delay.",
+    presetsMem: (secs, mb, kbps, typical) => `O maior (${secs} s) ocupa uns ${mb} MB de memória a ${kbps} kbps${typical ? " (bitrate típico)" : ""}.`,
     obsNotUsing: "O OBS ainda não está transmitindo pelo delay dinâmico.", configureObs: "Configurar o OBS automaticamente",
     keyMissing: "Falta a chave de transmissão. Preencha em Configuração.", update: (v) => `A versão ${v} está disponível.`, download: "Baixar",
     updates: "Atualizações", updCheck: "Verificar agora", updChecking: "Consultando o GitHub...", updOff: "Aviso de atualização desligado (Recursos e painel).",
@@ -382,8 +398,8 @@ const TEXT = {
     ovAdd: "Adicionar na cena atual do OBS", ovLink: "Link da fonte de navegador", ovPreview: "Prévia", ovReal: "Agora",
     ovStates: { on: "Ativo", adjusting: "Ajustando", replay: "Replay", off: "Desligado" },
     ovStyle: "Estilo", ovStyles: { pill: "Pílula", card: "Cartão", minimal: "Só texto" }, ovTheme: "Tema", ovThemes: { dark: "Escuro", light: "Claro", outline: "Contorno" },
-    ovShow: "Mostrar", ovDot: "Ponto", ovLabel: "Texto", ovSecs: "Segundos", ovProgress: "Linha de progresso",
-    ovHide: "Esconder enquanto o delay está desligado", ovSize: "Tamanho", ovAlign: "Alinhamento", ovAligns: { left: "Esquerda", center: "Centro", right: "Direita" },
+    ovShow: "Mostrar", ovDot: "Ponto", ovLabel: "Texto", ovSecs: "Segundos", ovProgress: "Linha de progresso", ovTimer: "Tempo até desligar sozinho",
+    ovOffline: "Mostrar também com a live desligada (para posicionar e ajustar)", ovHide: "Esconder enquanto o delay está desligado (ao vivo)", ovSize: "Tamanho", ovAlign: "Alinhamento", ovAligns: { left: "Esquerda", center: "Centro", right: "Direita" },
     ovFont: "Fonte", ovFonts: { sans: "Sans", mono: "Mono", condensed: "Condensada" }, ovFormat: "Tempo", ovColor: "Cor",
     ovTexts: "Textos (vazio = padrão)", ovDefaults: { on: "Delay", adjusting: "Ajustando", replay: "Replay", off: "Sem delay" },
     ovHint: "O widget é uma fonte de navegador do OBS: mova e redimensione como qualquer fonte. O que você muda aqui aparece na live na hora. Para um segundo visual, adicione parâmetros no link (por exemplo ?style=minimal&scale=150) ou use o campo CSS personalizado da fonte.",
@@ -407,12 +423,12 @@ const TEXT = {
     remove: "Remover", save: "Salvar", saved: "Salvo.", savedNext: "Salvo. Mudanças de destino valem na próxima live.",
     addRule: "Adicionar regra", actOn: "ligar", actOff: "desligar", actSet: "ligar com", rulesHint: "Quando uma dessas cenas entra no ar, o delay muda sozinho.",
     chatOn: "Ouvir comandos no chat", channel: "Canal", channelHint: "nome do seu canal, ex.: ragnar_cb", allow: "Quem pode usar", allowB: "só eu", allowM: "eu e os mods", allowV: "eu, mods e VIPs", prefix: "Comando",
-    chatHint: (p) => `No chat: ${p} on · ${p} off · ${p} 60 · ${p} apagar · ${p} replay · ${p} clipe · ${p} panico`,
+    chatHint: (p) => `No chat: ${p} on · ${p} off · ${p} 60 · ${p} 60 20m (ligado por 20 minutos) · ${p} timer 20 · ${p} apagar · ${p} replay · ${p} clipe · ${p} panico`,
     openDeck: "Abrir o deck neste PC (tablet ou segundo monitor)", deckKeys: "Botões do deck", deckColumns: "Colunas", addKey: "Adicionar botão",
-    deckDefaults: "Restaurar os botões padrão", keyLabel: "Texto no botão (vazio = automático)", noAudio: "(abra o OBS para listar as fontes de áudio)",
+    deckDefaults: "Restaurar os botões padrão", keyLabel: "Texto no botão (vazio = automático)", minutes: "Minutos (vazio = cancela o timer)", noAudio: "(abra o OBS para listar as fontes de áudio)",
     deckActions: {
       "delay.toggle": "Delay: ligar/desligar", "delay.on": "Delay: ligar", "delay.off": "Delay: desligar (voltar ao vivo)", "delay.set": "Delay: ligar com N segundos",
-      "delay.add": "Delay: somar/tirar segundos", censor: "Apagar antes de ir ao ar", replay: "Replay instantâneo", clip: "Salvar clipe", panic: "Botão de pânico",
+      "delay.add": "Delay: somar/tirar segundos", "delay.timer": "Delay: ligar por N minutos (desliga sozinho)", censor: "Apagar antes de ir ao ar", replay: "Replay instantâneo", clip: "Salvar clipe", panic: "Botão de pânico",
       catchup: "Alcançar depois de uma queda", "obs.scene": "OBS: trocar para a cena", "obs.mute": "OBS: mutar/desmutar fonte de áudio",
       "obs.stream": "OBS: iniciar/parar transmissão (segurar)", "obs.record": "OBS: iniciar/parar gravação (segurar)",
       "dest.toggle": "Multistream: ligar/desligar um destino (segurar)",
@@ -433,20 +449,118 @@ const TEXT = {
     active: "Ativo", inPanel: "Painel", alwaysOn: "sempre ativo", feature: "Recurso",
     up: "Subir", down: "Descer", obsStreaming: "OBS transmitindo", scriptMissing: "script do OBS não está rodando", obsReady: "OBS pronto", obsNotConfigured: "OBS não configurado",
   },
+  es: {
+    appName: "Delay dinámico", developedBy: "Desarrollado por", support: "Apoya el proyecto", noToken: "Falta el token de acceso. Abre el panel desde OBS (Docks > Delay dinámico) o con el botón \"Abrir panel\" del script.",
+    relayOff: "RELAY CERRADO", relayOffHint: "se abre junto con OBS", relayClosed: "El relay está cerrado", relayClosedHint: "Se abre junto con OBS. Abre OBS con el script del Delay dinámico cargado.",
+    noAnswer: "El relay no respondió. Inténtalo de nuevo.", openFailed: "No se pudo abrir en esta PC.",
+    noLive: "SIN DIRECTO", live: "EN DIRECTO", adjusting: "AJUSTANDO", delayed: "DELAY", replay: "REPLAY", panicPill: "PÁNICO",
+    phases: { live: "en directo", delayed: "con delay", growing: "esperando un keyframe", filling: "congelado, aplicando delay", shrinking: "volviendo al directo" },
+    delayForViewers: "retraso para el público", setTo: "configurado", toggleOff: "Desactivar delay (volver al directo)", toggleOn: (s) => `Activar delay de ${s}s`,
+    setPreset: (s) => `Poner el delay en ${s} segundos`, addPreset: (s) => (s < 0 ? `Quitar ${-s} segundos` : `Sumar ${s} segundos`),
+    autoOff: "Apagado automático", autoOffNone: "nunca", autoOffIn: (t) => `Se desactiva solo en ${t}`, autoOffArmed: (m) => `Se desactiva solo ${m} min después de activarlo`,
+    presetsEdit: "Editar los botones de delay", presetsLabel: "Botones de delay (segundos, separados por comas, hasta 6)",
+    presetsHint: "Muchos torneos de esports exigen de 120 a 300 s de delay.",
+    presetsMem: (secs, mb, kbps, typical) => `El más largo (${secs} s) ocupa unos ${mb} MB de memoria a ${kbps} kbps${typical ? " (bitrate típico)" : ""}.`,
+    obsNotUsing: "OBS todavía no está transmitiendo a través del delay dinámico.", configureObs: "Configurar OBS automáticamente",
+    keyMissing: "Falta la clave de transmisión. Complétala en Configuración.", update: (v) => `La versión ${v} está disponible.`, download: "Descargar",
+    updates: "Actualizaciones", updCheck: "Buscar ahora", updChecking: "Consultando GitHub...", updOff: "El aviso de actualización está desactivado (Funciones y panel).",
+    updCurrent: (v, at) => `Al día: la v${v} es la versión más reciente (verificado a las ${at}).`,
+    updAvailable: (v, cur) => `La versión ${v} está disponible (tienes la ${cur}). Descárgala y ejecuta el instalador.`,
+    updError: (at) => `No se pudo conectar con GitHub (último intento a las ${at}). Se vuelve a intentar en 15 minutos.`,
+    alertDown: (n) => `${n}: se perdió la conexión, reconectando...`,
+    overLimit: (k, p, m) => `OBS está enviando ${k} kbps, por encima del límite de ${p} de ${m} kbps, y el público puede bajar a 720p. Detén e inicia la transmisión: el script de OBS ajusta el encoder a las reglas de ${p}.`,
+    m: {
+      delay: "Delay", censor: "Borrar antes de salir al aire", replay: "Repetición instantánea", clips: "Clips", panic: "Botón de pánico", health: "Salud de la transmisión",
+      multistream: "Multistream", rules: "Delay por escena", chat: "Comandos en el chat de Twitch", phone: "Deck en el celular", streamdeck: "Stream Deck / API",
+      overlay: "Widget en pantalla", outage: "Protección contra caídas de conexión", update_check: "Aviso de actualización",
+    },
+    mDesc: {
+      delay: "activar/desactivar el delay, presets", censor: "quitar los últimos segundos antes de que el público los vea", replay: "repetir al aire los últimos segundos",
+      clips: "guardar los últimos segundos en MP4", panic: "tapar la transmisión y silenciar todo", health: "bitrate, conexiones, alertas",
+      multistream: "transmitir a varias plataformas a la vez", rules: "el delay cambia solo con la escena de OBS", chat: "comandos !delay para los mods",
+      phone: "tu celular se vuelve un Stream Deck: delay, escenas, audio, transmisión", streamdeck: "enlaces de botón para Stream Deck y bots",
+      overlay: "muestra al público que el delay está activo, y de cuántos segundos",
+      outage: "reenviar lo que se perdió cuando se cae la conexión con una plataforma", update_check: "busca versiones nuevas en GitHub",
+    },
+    ovAdd: "Agregar a la escena actual de OBS", ovLink: "Enlace de la fuente de navegador", ovPreview: "Vista previa", ovReal: "Ahora",
+    ovStates: { on: "Activo", adjusting: "Ajustando", replay: "Replay", off: "Desactivado" },
+    ovStyle: "Estilo", ovStyles: { pill: "Píldora", card: "Tarjeta", minimal: "Solo texto" }, ovTheme: "Tema", ovThemes: { dark: "Oscuro", light: "Claro", outline: "Contorno" },
+    ovShow: "Mostrar", ovDot: "Punto", ovLabel: "Texto", ovSecs: "Segundos", ovProgress: "Línea de progreso", ovTimer: "Tiempo restante del apagado automático",
+    ovOffline: "Mostrarlo también sin transmisión (para ubicarlo y ajustarlo)", ovHide: "Ocultar mientras el delay está desactivado (en directo)", ovSize: "Tamaño", ovAlign: "Alineación", ovAligns: { left: "Izquierda", center: "Centro", right: "Derecha" },
+    ovFont: "Fuente", ovFonts: { sans: "Sans", mono: "Mono", condensed: "Condensada" }, ovFormat: "Tiempo", ovColor: "Color",
+    ovTexts: "Textos (vacío = predeterminado)", ovDefaults: { on: "Delay", adjusting: "Ajustando", replay: "Replay", off: "Sin delay" },
+    ovHint: "El widget es una fuente de navegador de OBS: muévelo y cambia su tamaño como cualquier fuente. Lo que cambies aquí aparece en la transmisión al instante. Para un segundo estilo, agrega parámetros a su enlace (por ejemplo ?style=minimal&scale=150) o usa el campo CSS personalizado de la fuente.",
+    seconds: "Segundos", censorBtn: (s) => `Borrar los últimos ${s}s`, censorHint: "Solo funciona con el delay activo: se quita la parte que el público todavía no vio y la transmisión mantiene el último cuadro en su lugar.",
+    replayBtn: (s) => `Repetir los últimos ${s}s`, replayHint: "El público vuelve a ver los últimos segundos y luego la transmisión regresa al delay normal.",
+    clipSource: "Los clips salen en", clipSame: "mismo tamaño y FPS que la transmisión: el clip la copia cuadro por cuadro", clipUnknown: "aparece cuando OBS esté abierto",
+    fpsLow: (f) => `OBS funciona a ${f} FPS, así que los clips (y la transmisión) tienen ${f} FPS. Cambia OBS a 60 FPS para clips fluidos a 60 FPS; en 1080p60 mantén 6000 kbps en Twitch.`,
+    fpsBtn: "Cambiar OBS a 60 FPS", fpsBusy: "Primero detén la transmisión y la grabación.", clipLength: "Duración",
+    clipAired: "Solo lo que el público ya vio (deja fuera la parte que sigue en el delay)", clipsFolder: "Carpeta de clips", folderHint: "Vacío = Videos\\Dynamic Delay",
+    clipBtn: (s) => `Guardar los últimos ${s}s`, lastClip: "Último clip", folder: "Carpeta", openFolder: "Abrir la carpeta de clips", clipHint: "MP4 (H.264 + AAC) con FPS constantes, listo para TikTok, Shorts y editores de video.",
+    panicBtn: "PÁNICO", panicOff: "Salir del modo pánico", panicScene: "Escena a mostrar", panicMute: "Silenciar todo el audio", panicCensor: "También borrar lo que todavía no salió al aire (requiere el delay activo)",
+    none: "(ninguna)", uptime: "En directo desde hace", fromObs: "Desde OBS", reconnects: "reconexiones", behind: (s) => `${s}s de atraso después de una caída`, catchUp: "Alcanzar",
+    outage: "Guardar lo que se perdió en una caída de conexión (segundos, 0 = desactivado)", alertSound: "Pitido cuando se cae una conexión", destinations: "Destinos",
+    states: { idle: "inactiva", connecting: "conectando...", connected: "conectada", reconnecting: "reconectando..." },
+    mainDest: "El destino principal está en Configuración. Agrega otros aquí:", addDest: "Agregar destino",
+    msNow: "Destinos ahora", msStart: "Entrar en directo", msStop: "Detener", msStopped: "detenido",
+    msLiveHint: "Cada destino entra en directo o se detiene por su cuenta, sin tocar los demás ni OBS.",
+    msIdle: "Inicia la transmisión en OBS: los destinos marcados para iniciar con la transmisión entran en directo juntos, los demás se pueden iniciar aquí.",
+    autoStart: "Iniciar junto con la transmisión", kickUrl: "La dirección de tu panel de Kick (Configuración > URL y clave de transmisión), si es diferente.",
+    msBandwidth: "Cada destino envía la transmisión completa: dos a 6000 kbps necesitan unos 12 Mbps de subida.", name: "Nombre", url: "URL del servidor", key: "Clave de transmisión", enabled: "Activo",
+    remove: "Quitar", save: "Guardar", saved: "Guardado.", savedNext: "Guardado. Los cambios de destino se aplican en la próxima transmisión.",
+    addRule: "Agregar regla", actOn: "activar", actOff: "desactivar", actSet: "activar con", rulesHint: "Cuando una de estas escenas sale al aire, el delay cambia solo.",
+    chatOn: "Escuchar comandos en el chat", channel: "Canal", channelHint: "el nombre de tu canal, ej.: ragnar_cb", allow: "Quién puede usarlos", allowB: "solo yo", allowM: "yo y los mods", allowV: "yo, los mods y los VIP", prefix: "Comando",
+    chatHint: (p) => `En el chat: ${p} on · ${p} off · ${p} 60 · ${p} 60 20m (activo por 20 minutos) · ${p} timer 20 · ${p} borrar · ${p} replay · ${p} clip · ${p} panico`,
+    openDeck: "Abrir el deck en esta PC (tablet o segundo monitor)", deckKeys: "Botones del deck", deckColumns: "Columnas", addKey: "Agregar botón",
+    deckDefaults: "Restaurar los botones predeterminados", keyLabel: "Texto en el botón (vacío = automático)", minutes: "Minutos (vacío = cancela el temporizador)", noAudio: "(abre OBS para ver las fuentes de audio)",
+    deckActions: {
+      "delay.toggle": "Delay: activar/desactivar", "delay.on": "Delay: activar", "delay.off": "Delay: desactivar (volver al directo)", "delay.set": "Delay: activar con N segundos",
+      "delay.add": "Delay: sumar/quitar segundos", "delay.timer": "Delay: activo por N minutos (apagado automático)", censor: "Borrar antes de salir al aire", replay: "Repetición instantánea", clip: "Guardar clip", panic: "Botón de pánico",
+      catchup: "Alcanzar después de una caída", "obs.scene": "OBS: cambiar a la escena", "obs.mute": "OBS: silenciar/activar fuente de audio",
+      "obs.stream": "OBS: iniciar/detener transmisión (mantener)", "obs.record": "OBS: iniciar/detener grabación (mantener)",
+      "dest.toggle": "Multistream: iniciar/detener un destino (mantener)",
+    },
+    colors: { "": "color automático", blue: "azul", green: "verde", orange: "naranja", red: "rojo", grey: "gris" },
+    lanHint: "Escanea con la cámara del celular (misma red Wi-Fi). Windows puede pedir que permitas la conexión. Cualquiera con este enlace controla el delay: no lo compartas.",
+    sdPlugin: "Con el plugin Delay dinámico para Stream Deck (en la página de releases), pega este token en su configuración:", token: "Token de acceso",
+    sdHint: "Sin el plugin: usa la acción \"Website\" con \"Access in background\" y uno de estos enlaces (ya incluyen tu token).", copy: "Copiar", copied: "¡Copiado!",
+    toggle: "Activar/desactivar delay", on: "Activar delay", off: "Desactivar delay", mainName: "Principal",
+    settings: "Configuración", platform: "Plataforma", other: "Otra", serverUrl: "URL del servidor (cópiala del panel de la plataforma)", streamKey: "Clave de transmisión",
+    keySaved: "guardada (escribe para reemplazarla)", keyPaste: "pega la clave aquí", growLabel: "Al activar o aumentar el delay",
+    growRewind: "Rebobinar (repite los últimos segundos, sin congelar)", growScene: "Mostrar una escena de OBS mientras el delay se llena", growFreeze: "Congelar la imagen del directo mientras el delay se llena",
+    sceneLabel: "Escena que se muestra mientras el delay se llena", sceneTip: "Consejo: crea una escena con solo una imagen o un texto. Se muestra fija y sin sonido.", noScenes: "(abre OBS para ver las escenas)",
+    startEnabled: "Empezar cada transmisión con el delay activo", language: "Idioma", restoreObs: "Restaurar la configuración de transmisión original de OBS",
+    grpStream: "Destino de la transmisión", grpDelay: "Comportamiento del delay", grpGeneral: "General",
+    confirmRestore: "Haz clic de nuevo para confirmar: OBS vuelve a transmitir directo, sin el delay dinámico.", applying: "Aplicando en OBS...", pickScene: "Elige la escena.",
+    customize: "Funciones y panel", customizeHint: "Activo: la función trabaja (desactivada = no hace nada, sus comandos se rechazan y su trabajo en segundo plano se detiene). Panel: muestra su bloque aquí. Flechas: orden.",
+    active: "Activo", inPanel: "Panel", alwaysOn: "siempre activo", feature: "Función",
+    up: "Subir", down: "Bajar", obsStreaming: "OBS transmitiendo", scriptMissing: "el script de OBS no se está ejecutando", obsReady: "OBS listo", obsNotConfigured: "OBS sin configurar",
+  },
 };
 const ALL_MODULES = ["delay", "censor", "replay", "clips", "panic", "health", "multistream", "rules", "chat", "phone", "streamdeck", "overlay"];
 // Blocks backed by a feature switch (config "features"); the others are always on.
 const FEATURE_OF = { censor: "censor", replay: "replay", clips: "clips", panic: "panic", multistream: "multistream", rules: "rules", chat: "chat", phone: "phone", overlay: "overlay" };
 // Features without a block of their own.
 const EXTRA_FEATURES = ["outage", "update_check"];
-const DECK_ACTIONS = ["delay.toggle", "delay.on", "delay.off", "delay.set", "delay.add", "censor", "replay", "clip", "panic", "catchup",
+const DECK_ACTIONS = ["delay.toggle", "delay.on", "delay.off", "delay.set", "delay.add", "delay.timer", "censor", "replay", "clip", "panic", "catchup",
   "obs.scene", "obs.mute", "obs.stream", "obs.record", "dest.toggle"];
 const DEFAULT_DECK = [["delay.toggle", ""], ["delay.add", "-5"], ["delay.add", "5"], ["censor", ""], ["replay", ""], ["clip", ""],
   ["panic", ""], ["delay.off", ""], ["obs.stream", ""]].map(([action, arg]) => ({ action, arg, label: "", color: "" }));
+// auto-off choices in the delay block (minutes, 0 = never)
+const AUTO_OFF = [0, 15, 30, 60, 90, 120];
+const mmss = (secs) => `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, "0")}`;
+const parsePresets = (text) => text.split(/[,;\s]+/).map((x) => parseInt(x)).filter((n) => n > 0);
 const featureOn = (block) => !FEATURE_OF[block] || cfg.features[FEATURE_OF[block]];
-let lang = /^pt/i.test(navigator.language) ? "pt" : "en";
+// Texts missing in a language fall back to English (deep merge, once).
+const withFallback = (base, over) => Object.fromEntries(Object.keys(base).map((k) => [k,
+  over[k] === undefined ? base[k]
+    : base[k] && typeof base[k] === "object" && typeof over[k] === "object" ? withFallback(base[k], over[k]) : over[k]]));
+for (const l of Object.keys(TEXT)) if (l !== "en") TEXT[l] = withFallback(TEXT.en, TEXT[l]);
+let lang = (/^(pt|es)/i.exec(navigator.language || "") || [, "en"])[1].toLowerCase();
 const T = () => TEXT[lang] || TEXT.en;
-const num = (x) => (lang === "pt" ? x.toFixed(1).replace(".", ",") : x.toFixed(1));
+// decimal comma in Portuguese and Spanish
+const comma = () => lang === "pt" || lang === "es";
+const num = (x) => (comma() ? x.toFixed(1).replace(".", ",") : x.toFixed(1));
 const $ = (id) => document.getElementById(id);
 
 // ---------------------------------------------------------------- icons
@@ -562,15 +676,29 @@ function sceneSelect(value, onchange, allowNone, kind) {
 }
 
 // ---------------------------------------------------------------- API
+// Always resolves: a relay that does not answer (5 s) or answers something that is not
+// JSON gives { ok: false, error } with a readable text, like any refused call.
 async function api(path, opts = {}) {
-  const r = await fetch(API + path, {
-    method: opts.method || (opts.body ? "POST" : "GET"),
-    headers: Object.assign({ "x-dd-token": TOKEN }, opts.body ? { "Content-Type": "application/json" } : {}),
-    body: opts.body ? JSON.stringify(opts.body) : undefined,
-  });
-  return r.json();
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), 5000);
+  try {
+    const r = await fetch(API + path, {
+      method: opts.method || (opts.body ? "POST" : "GET"),
+      headers: Object.assign({ "x-dd-token": TOKEN }, opts.body ? { "Content-Type": "application/json" } : {}),
+      body: opts.body ? JSON.stringify(opts.body) : undefined,
+      signal: ctl.signal,
+    });
+    const text = await r.text();
+    try { return JSON.parse(text); } catch (e) {
+      return { ok: false, error: text.trim().slice(0, 200) || `HTTP ${r.status}` };
+    }
+  } catch (e) {
+    return { ok: false, error: T().noAnswer, offline: true };
+  } finally {
+    clearTimeout(timer);
+  }
 }
-const cmd = (c) => api("/api/cmd/" + c, { method: "POST" }).then(refresh);
+const cmd = (c) => api("/api/cmd/" + c, { method: "POST" }).then((r) => { if (!r.ok) toast(r.error, "error"); refresh(); });
 async function saveConfig(patch, msgEl) {
   const r = await api("/api/config", { body: patch });
   if (msgEl) msgEl.textContent = !r.ok ? r.error : r.next_stream ? T().savedNext : T().saved;
@@ -593,17 +721,44 @@ const MODULES = {
       this.fill = h("span");
       this.sub = h("div", { class: "sub" });
       this.toggle = button("wide", "power", "", () => cmd("toggle"));
-      this.presets = [10, 30, 60, 120].map((s) => {
+      const list = cfg.presets && cfg.presets.length ? cfg.presets : [10, 30, 60, 120];
+      this.presets = list.map((s) => {
         const b = h("button", { class: "btn", type: "button", text: `${s}s`, "aria-label": T().setPreset(s), onclick: () => cmd("set/" + s) });
         b.secs = s;
         return b;
       });
-      const presets = h("div", { class: "presets" }, ...this.presets,
+      // one row up to 7 buttons, else two rows of 4
+      const cols = list.length + 2 <= 7 ? list.length + 2 : 4;
+      const presets = h("div", { class: "presets", style: `grid-template-columns:repeat(${cols},1fr)` }, ...this.presets,
         h("button", { class: "btn", type: "button", text: "−5", "aria-label": T().addPreset(-5), onclick: () => cmd("add/-5") }),
         h("button", { class: "btn", type: "button", text: "+5", "aria-label": T().addPreset(5), onclick: () => cmd("add/5") }));
+      this.timer = h("select", { style: "width:120px", onchange: (e) => cmd("autooff/" + e.target.value) },
+        ...AUTO_OFF.map((m) => h("option", { value: m, text: m ? `${m} min` : T().autoOffNone })));
+      this.timerLine = h("p", { class: "hint", role: "timer" });
+      // editor of the preset buttons, closed by default (stays open across rebuilds)
+      this.edit = h("input", { type: "text", value: list.join(", "), inputmode: "numeric", spellcheck: "false", oninput: () => this.showMem() });
+      this.mem = hint("");
+      const editor = h("div", { class: "group" + (this.editOpen ? "" : " hidden"), style: "gap:6px" },
+        field(T().presetsLabel, h("div", { class: "item-row" }, h("div", { class: "grow" }, this.edit),
+          button("small", "check", T().save, () => saveConfig({ presets: parsePresets(this.edit.value) }).then((r) => { if (r.ok) toast(T().saved, "ok"); }))), T().presetsHint),
+        this.mem);
+      const editBtn = button("link", "sliders", T().presetsEdit, () => {
+        this.editOpen = !editor.classList.toggle("hidden");
+        editBtn.setAttribute("aria-expanded", String(this.editOpen));
+      }, { "aria-expanded": String(!!this.editOpen) });
+      this.showMem();
       return [h("div", { class: "hero-top" }, this.pill, this.phase),
         h("div", {}, h("div", { class: "readout" }, this.big, h("span", { class: "unit", text: "s" }))),
-        h("div", { class: "meter", "aria-hidden": "true" }, this.fill), this.sub, this.toggle, presets];
+        h("div", { class: "meter", "aria-hidden": "true" }, this.fill), this.sub, this.toggle, presets,
+        inlineField(T().autoOff, this.timer), this.timerLine, editBtn, editor];
+    },
+    // memory the longest typed preset needs: seconds x bitrate, plus about 20% for the rest of the buffer
+    showMem() {
+      const typed = parsePresets(this.edit.value);
+      const secs = Math.max(...(typed.length ? typed : cfg.presets || [120]));
+      const measured = status?.engine ? status.health.in_kbps : 0;
+      const kbps = measured || 6000;
+      this.mem.textContent = T().presetsMem(secs, Math.round(secs * kbps / 8 / 1000 * 1.2), kbps, !measured);
     },
     update(s) {
       const e = s.engine;
@@ -627,6 +782,14 @@ const MODULES = {
       this.toggle.className = "btn wide " + (s.enabled ? "warn" : "primary");
       this.toggle.lbl.textContent = s.enabled ? T().toggleOff : T().toggleOn(s.delay_seconds);
       for (const b of this.presets) b.setAttribute("aria-pressed", String(s.enabled && s.delay_seconds === b.secs));
+      const m = s.auto_off_minutes || 0;
+      // a length set from chat or the deck that is not in the list
+      if (![...this.timer.options].some((o) => +o.value === m)) this.timer.append(h("option", { value: m, text: `${m} min` }));
+      if (document.activeElement !== this.timer) this.timer.value = String(m);
+      this.timerLine.textContent = s.auto_off_s != null ? T().autoOffIn(mmss(s.auto_off_s)) : m ? T().autoOffArmed(m) : "";
+      this.timerLine.classList.toggle("hidden", !this.timerLine.textContent);
+      if (s.auto_off_s != null) this.mini.textContent += ` · ${mmss(s.auto_off_s)}`;
+      if (document.activeElement !== this.edit) this.showMem();
     },
   },
   censor: {
@@ -671,7 +834,7 @@ const MODULES = {
         field(T().clipsFolder, h("div", { class: "item-row" }, h("div", { class: "grow" }, folder),
           button("small", "check", T().save, () => saveConfig({ clips_dir: folder.value.trim() }, folderMsg))), T().folderHint),
         folderMsg,
-        button("link", "folder", T().openFolder, () => api("/api/open/clips", { method: "POST" })), hint(T().clipHint)];
+        button("link", "folder", T().openFolder, () => openTarget("clips")), hint(T().clipHint)];
     },
     update(s) {
       this.btn.lbl.textContent = T().clipBtn(cfg.clip_seconds); this.btn.disabled = !s.engine;
@@ -786,8 +949,8 @@ const MODULES = {
           this.rows[o.id] = rate;
           const state = o.running ? T().states[o.state] : T().msStopped;
           const btn = o.running
-            ? button("small", "x", T().msStop, () => api(`/api/output/${o.id}/stop`, { method: "POST" }).then(refresh))
-            : button("small primary", "tower", T().msStart, () => api(`/api/output/${o.id}/start`, { method: "POST" }).then(refresh));
+            ? button("small", "x", T().msStop, () => outputAction(o.id, "stop"), { "aria-label": `${T().msStop}: ${o.name}` })
+            : button("small primary", "tower", T().msStart, () => outputAction(o.id, "start"), { "aria-label": `${T().msStart}: ${o.name}` });
           return h("div", { class: "link-row" }, h("span", { class: "dot grow " + (o.running ? cls[o.state] : "") }, h("span", {}, h("b", { text: o.name }), ` · ${state}`)), rate, btn);
         }));
       }
@@ -844,7 +1007,7 @@ const MODULES = {
       cols.value = String(this.draft.columns);
       this.render();
       return [this.qr, hint(T().lanHint),
-        button("link", "external", T().openDeck, () => api("/api/open/deck", { method: "POST" })),
+        button("link", "external", T().openDeck, () => openTarget("deck")),
         h("div", { class: "group" }, h("p", { class: "eyebrow", text: T().deckKeys }), inlineField(T().deckColumns, cols), this.list,
           h("div", { class: "actions" },
             button("", "plus", T().addKey, () => { this.draft.keys.push({ action: "delay.toggle", arg: "", label: "", color: "" }); this.render(); }),
@@ -867,8 +1030,9 @@ const MODULES = {
           arg.value = k.arg || "main";
           k.arg = arg.value;
         }
-        else if (k.action === "delay.set" || k.action === "delay.add" || ["censor", "replay", "clip"].includes(k.action)) {
-          arg = h("input", { type: "number", style: "width:100%;text-align:left", value: k.arg, placeholder: k.action === "delay.add" ? "5 / -5" : T().seconds, oninput: (e) => (k.arg = e.target.value) });
+        else if (k.action === "delay.set" || k.action === "delay.add" || k.action === "delay.timer" || ["censor", "replay", "clip"].includes(k.action)) {
+          const ph = k.action === "delay.add" ? "5 / -5" : k.action === "delay.timer" ? T().minutes : T().seconds;
+          arg = h("input", { type: "number", style: "width:100%;text-align:left", value: k.arg, placeholder: ph, "aria-label": ph, oninput: (e) => (k.arg = e.target.value) });
         }
         const swatch = h("span", { class: "swatch" });
         const paint = () => swatch.style.setProperty("--c", k.color ? SWATCH[k.color] : "transparent");
@@ -950,7 +1114,8 @@ const MODULES = {
           field(T().ovFormat, select("time_format", { s: "30s", clock: "0:30" })), field(T().ovColor, color)),
         h("label", {}, h("span", { class: "field-label" }, T().ovSize + " ", size), scale),
         h("div", { class: "group", style: "gap:6px" }, h("span", { class: "field-label", text: T().ovShow }),
-          h("div", { class: "grid2" }, flag("show_dot", T().ovDot), flag("show_label", T().ovLabel), flag("show_seconds", T().ovSecs), flag("show_progress", T().ovProgress))),
+          h("div", { class: "grid2" }, flag("show_dot", T().ovDot), flag("show_label", T().ovLabel), flag("show_seconds", T().ovSecs), flag("show_progress", T().ovProgress), flag("show_timer", T().ovTimer))),
+        flag("show_offline", T().ovOffline),
         flag("hide_when_off", T().ovHide),
         h("div", { class: "group", style: "gap:6px" }, h("span", { class: "field-label", text: T().ovTexts }),
           h("div", { class: "grid2" }, text("label_on", "on"), text("label_adjusting", "adjusting"), text("label_replay", "replay"), text("label_off", "off"))),
@@ -960,7 +1125,7 @@ const MODULES = {
   },
 };
 // 59.94 stays 59.94, 60.0 becomes 60
-const fpsText = (f) => (Math.round(f * 100) / 100).toString().replace(".", lang === "pt" ? "," : ".");
+const fpsText = (f) => (Math.round(f * 100) / 100).toString().replace(".", comma() ? "," : ".");
 const SWATCH = { blue: "#60a5fa", green: "#34d399", orange: "#fbbf24", red: "#f87171", grey: "#8a8f9c" };
 
 function copyText(text) {
@@ -985,7 +1150,8 @@ function obsLine(s) {
 function setChip(cls, text) {
   const c = $("conn");
   c.className = "chip " + cls;
-  c.textContent = text;
+  // role=status: rewriting the same text every poll would make screen readers repeat it
+  if (c.textContent !== text) c.textContent = text;
 }
 
 // ---------------------------------------------------------------- settings (always available)
@@ -997,25 +1163,38 @@ function buildSettings() {
   const card = $("settingsCard");
   const open = card.open;
   const msg = h("span", { class: "note" });
-  const platformOf = (u) => Object.keys(URLS).find((k) => URLS[k] === u) || (/kick|live-video\.net/.test(u) ? "kick" : "custom");
-  const platform = h("select", {}, h("option", { value: "twitch", text: "Twitch" }), h("option", { value: "youtube", text: "YouTube" }),
-    h("option", { value: "kick", text: "Kick" }), h("option", { value: "custom", text: T().other }));
-  platform.value = platformOf(cfg.upstream_url);
-  const url = h("input", { type: "text", placeholder: "rtmps://...", value: URLS[platform.value] ? "" : cfg.upstream_url });
-  const urlRow = field(T().serverUrl, url);
+  const platform = h("select", {}, ...Object.entries(PLATFORM_NAMES).map(([k, n]) => h("option", { value: k, text: n })),
+    h("option", { value: "custom", text: T().other }));
+  platform.value = platformOfUrl(cfg.upstream_url);
+  // Kick keeps its own URL (it can be account specific), like in the multistream block
+  const fixedUrl = () => !!URLS[platform.value] && platform.value !== "kick";
+  const url = h("input", { type: "text", placeholder: "rtmps://...", value: fixedUrl() ? "" : cfg.upstream_url });
+  const urlRow = field(T().serverUrl, url, T().kickUrl);
+  const urlHint = urlRow.lastChild;
   const key = h("input", { type: "password", autocomplete: "off", placeholder: cfg.stream_key_set ? T().keySaved : T().keyPaste });
   const grow = h("select", {}, h("option", { value: "rewind", text: T().growRewind }), h("option", { value: "scene", text: T().growScene }),
     h("option", { value: "freeze", text: T().growFreeze }));
   grow.value = cfg.grow_mode;
   const scene = sceneSelect(cfg.delay_scene, () => {});
   const sceneRow = field(T().sceneLabel, scene, T().sceneTip);
-  const showRows = () => { urlRow.classList.toggle("hidden", !!URLS[platform.value]); sceneRow.classList.toggle("hidden", grow.value !== "scene"); };
-  platform.onchange = showRows;
+  const showRows = () => {
+    urlRow.classList.toggle("hidden", fixedUrl());
+    urlHint.classList.toggle("hidden", platform.value !== "kick");
+    sceneRow.classList.toggle("hidden", grow.value !== "scene");
+  };
+  platform.onchange = () => {
+    // Kick starts from the default ingest (or the saved Kick one); "Other" starts empty
+    const was = platformOfUrl(url.value.trim());
+    if (platform.value === "kick" && was !== "kick") url.value = platformOfUrl(cfg.upstream_url) === "kick" ? cfg.upstream_url : URLS.kick;
+    else if (platform.value === "custom" && URLS[was]) url.value = "";
+    showRows();
+  };
   grow.onchange = showRows;
   showRows();
   const start = h("input", { type: "checkbox", checked: cfg.start_enabled });
   const language = h("select", { onchange: (e) => saveConfig({ language: e.target.value }) },
-    h("option", { value: "en", text: "English" }), h("option", { value: "pt", text: "Português (Brasil)" }));
+    h("option", { value: "en", text: "English" }), h("option", { value: "pt", text: "Português (Brasil)" }),
+    h("option", { value: "es", text: "Español" }));
   language.value = cfg.language;
   let armed = 0;
   const restore = button("link dangerous", "replay", T().restoreObs, () => {
@@ -1024,10 +1203,10 @@ function buildSettings() {
   });
   const updText = h("span", { class: "hint" });
   const updCheck = button("small", "replay", T().updCheck, () => api("/api/update/check", { method: "POST" }).then((r) => { if (!r.ok) toast(r.error, "error"); }));
-  const updDownload = button("small", "download", T().download, () => api("/api/open/releases", { method: "POST" }));
+  const updDownload = button("small", "download", T().download, () => openTarget("releases"));
   updateLine = { text: updText, check: updCheck, download: updDownload };
   const save = button("primary", "check", T().save, () => {
-    const body = { upstream_url: URLS[platform.value] || url.value.trim(), grow_mode: grow.value, delay_scene: scene.value, start_enabled: start.checked };
+    const body = { upstream_url: fixedUrl() ? URLS[platform.value] : url.value.trim() || URLS[platform.value] || "", grow_mode: grow.value, delay_scene: scene.value, start_enabled: start.checked };
     if (key.value.trim()) body.stream_key = key.value.trim();
     if (body.grow_mode === "scene" && !body.delay_scene) { msg.textContent = T().pickScene; return; }
     saveConfig(body, msg);
@@ -1078,12 +1257,34 @@ function buildCustomize() {
 function obsAction(path) {
   api(path, { method: "POST" }).then((r) => toast(r.ok ? T().applying : r.error, r.ok ? "ok" : "error"));
 }
+function outputAction(id, action) {
+  api(`/api/output/${id}/${action}`, { method: "POST" }).then((r) => { if (!r.ok) toast(r.error, "error"); refresh(); });
+}
+// Where each /api/open target goes when the relay cannot open it on the PC (the clips folder has no web address).
+const OPEN_FALLBACK = {
+  author: () => $("author").href,
+  releases: () => "https://github.com/ragnarcb/obs-dynamic-delay/releases/latest",
+  support: () => ({
+    pt: "https://github.com/ragnarcb/obs-dynamic-delay/blob/main/README.pt-BR.md#apoie-o-projeto",
+    es: "https://github.com/ragnarcb/obs-dynamic-delay/blob/main/README.es.md#apoya-el-proyecto",
+  })[lang] || "https://github.com/ragnarcb/obs-dynamic-delay#support-the-project",
+  deck: () => (API || location.origin) + "/deck?token=" + encodeURIComponent(TOKEN),
+};
+// Asks the relay to open it in the PC's browser (inside an OBS dock a link would navigate the dock itself).
+function openTarget(target) {
+  api("/api/open/" + target, { method: "POST" }).then((r) => {
+    if (r.ok) return;
+    const url = OPEN_FALLBACK[target];
+    if (url) window.open(url(), "_blank", "noopener");
+    else toast(r.error || T().openFailed, "error");
+  });
+}
 
 // ---------------------------------------------------------------- page assembly
 function buildAll() {
   sceneSelects = [];
   bannersKey = null;
-  document.documentElement.lang = lang === "pt" ? "pt-BR" : "en";
+  document.documentElement.lang = lang === "pt" ? "pt-BR" : lang;
   document.querySelectorAll("[data-t]").forEach((el) => (el.textContent = T()[el.dataset.t]));
   const root = $("modules");
   root.replaceChildren();
@@ -1132,8 +1333,8 @@ function platformLimit() {
   const caps = { Twitch: 6000, Kick: 8000 };
   let best = null;
   for (const u of [cfg.upstream_url, ...(cfg.destinations || []).filter((d) => d.enabled).map((d) => d.url)]) {
-    const host = ((u || "").match(/^\w+:\/\/([^/:]+)/) || [])[1] || "";
-    const name = /twitch\.tv$|^ingest\..*live-video\.net$/i.test(host) ? "Twitch" : /live-video\.net$/i.test(host) ? "Kick" : null;
+    const host = hostOf(u);
+    const name = isKickHost(host) ? "Kick" : isTwitchHost(host) ? "Twitch" : null;
     if (name && (!best || caps[name] < best.max)) best = { name, max: caps[name] };
   }
   return best;
@@ -1175,22 +1376,28 @@ function render(s) {
       if (w === "key") return callout("", "key", h("span", { text: T().keyMissing }));
       if (w === "over") return callout("", "activity", h("span", { text: T().overLimit(s.health.in_kbps, lim.name, lim.max) }));
       if (w.startsWith("up:")) return callout("info", "download", h("span", { text: T().update(updateVersion) }),
-        h("div", { class: "actions" }, button("small", "external", T().download, () => api("/api/open/releases", { method: "POST" }))));
+        h("div", { class: "actions" }, button("small", "external", T().download, () => openTarget("releases"))));
       return callout("bad", "alert", h("span", { text: T().alertDown(w.slice(5)) }));
     }));
   }
   const ev = s.event ? s.event.id : 0;
   if (lastEvent !== null && ev !== lastEvent && s.event) toast(s.event.text, s.event.kind);
   lastEvent = ev;
-  if (o.message && o.message !== lastMessage) {
-    if (lastMessage !== null) { toast(o.message, "ok"); loadConfig(); }
-    lastMessage = o.message;
+  // each OBS result has its own id, so the same text shows again when it happens again
+  const mid = o.message_id || 0;
+  if (lastMessage !== null && mid !== lastMessage && o.message) {
+    toast(o.message, o.message_error ? "error" : "ok");
+    loadConfig();
   }
+  lastMessage = mid;
 }
 
+// One AudioContext for every beep: Chromium caps how many a page may create.
+let audioCtx = null;
 function beep() {
   try {
-    const ctx = new AudioContext();
+    const ctx = audioCtx || (audioCtx = new AudioContext());
+    if (ctx.state === "suspended") ctx.resume().catch(() => {});
     const osc = ctx.createOscillator();
     osc.frequency.value = 880;
     osc.connect(ctx.destination);
@@ -1229,7 +1436,10 @@ function renderUpdate(s) {
 }
 
 let offline = false;
+let polling = false;
 async function refresh() {
+  if (polling) return; // the last poll has not come back yet (slow relay): skip this one
+  polling = true;
   try {
     const s = await api("/api/status");
     if (s.ok === false) throw new Error(s.error);
@@ -1247,18 +1457,24 @@ async function refresh() {
     }
     if (!cfg) $("modules").replaceChildren(h("div", { class: "card empty" }, h("span", { class: "ico tone-red" }, icon("plug")),
       h("b", { text: T().relayClosed }), hint(T().relayClosedHint)));
+  } finally {
+    polling = false;
   }
 }
 
 $("logo").innerHTML = LOGO_SVG;
 $("support").onclick = (ev) => {
   ev.preventDefault();
-  api("/api/open/support", { method: "POST" }).catch(() => {});
+  openTarget("support");
+};
+$("discord").onclick = (ev) => {
+  ev.preventDefault();
+  api("/api/open/discord", { method: "POST" }).catch(() => window.open($("discord").href, "_blank"));
 };
 $("author").onclick = (ev) => {
   // inside an OBS dock a plain link would navigate the dock itself: ask the relay to open the browser
   ev.preventDefault();
-  api("/api/open/author", { method: "POST" }).catch(() => window.open($("author").href, "_blank"));
+  openTarget("author");
 };
 document.querySelectorAll("[data-t]").forEach((el) => (el.textContent = T()[el.dataset.t]));
 setChip("", "...");

@@ -142,7 +142,8 @@ fn sps_size(sps: &[u8]) -> Option<(u16, u16)> {
                     let (mut last, mut next) = (8i32, 8i32);
                     for _ in 0..size {
                         if next != 0 {
-                            next = (last + r.se()? + 256) % 256;
+                            // delta_scale is -128..=127 in a valid SPS; `% 256` keeps a corrupt one from overflowing
+                            next = (last + r.se()? % 256 + 256) % 256;
                         }
                         if next != 0 {
                             last = next;
@@ -187,8 +188,9 @@ fn sps_size(sps: &[u8]) -> Option<(u16, u16)> {
         _ => (1, 1),
     };
     let unit_y = sub_h * (2 - frame_mbs_only);
-    let width = (w_mbs * 16).checked_sub((cl + cr) * sub_w)?;
-    let height = ((2 - frame_mbs_only) * h_units * 16).checked_sub((ct + cb) * unit_y)?;
+    // checked: the values come from the stream and may be garbage
+    let width = w_mbs.checked_mul(16)?.checked_sub(cl.checked_add(cr)?.checked_mul(sub_w)?)?;
+    let height = h_units.checked_mul(16 * (2 - frame_mbs_only))?.checked_sub(ct.checked_add(cb)?.checked_mul(unit_y)?)?;
     Some((u16::try_from(width).ok()?, u16::try_from(height).ok()?))
 }
 
@@ -347,6 +349,38 @@ mod tests {
         assert_eq!(frame_grid(30.0), (30000, 1000));
         assert_eq!(frame_grid(29.97), (30000, 1001));
         assert_eq!(frame_grid(144.0), (90000, 625));
+    }
+
+    /// Header parsers see bytes straight from the network: garbage must give
+    /// `None`, never a panic (debug builds check arithmetic overflow too).
+    #[test]
+    fn header_parsers_survive_garbage() {
+        let mut seed = 0x2545_F491_4F6C_DD1Du64;
+        let mut next = move || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            seed
+        };
+        for n in 0..200_000 {
+            let len = (next() % 64) as usize;
+            let mut d: Vec<u8> = (0..len).map(|_| next() as u8).collect();
+            // steer half of the inputs past the first checks
+            if n % 2 == 0 && len > 2 {
+                (d[0], d[1]) = (0x17, 0);
+            }
+            let _ = parse_avc_config(&d);
+            let _ = avc_size(&d);
+            let _ = sps_size(&d);
+            let _ = parse_aac(&d);
+            let _ = crate::flv::video_cts(&d);
+            let _ = crate::flv::video_is_keyframe(&d);
+            let _ = crate::flv::audio_is_sequence_header(&d);
+        }
+        // exponential-Golomb codes of 31 leading zeros (the largest accepted) everywhere
+        let mut sps = vec![0x67, 100, 0, 0x2a];
+        sps.extend([0x00, 0x00, 0x00, 0x01, 0xFF, 0xFF, 0xFF, 0xFF].repeat(40));
+        assert!(sps_size(&sps).is_none());
     }
 
     #[test]

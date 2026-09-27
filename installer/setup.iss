@@ -75,37 +75,51 @@ SignedUninstaller=yes
 [Languages]
 Name: "en"; MessagesFile: "compiler:Default.isl"
 Name: "pt"; MessagesFile: "compiler:Languages\BrazilianPortuguese.isl"
+Name: "es"; MessagesFile: "compiler:Languages\Spanish.isl"
 
 [Messages]
 en.WelcomeLabel2=This installs [name/ver] on your computer.%n%nTurn your stream delay on and off at any moment, while you are live, and get delete before it airs, instant replay, clips, multistream and more, all in a panel inside OBS.%n%nThe Setup adds the script and the Dynamic Delay panel to OBS and makes OBS stream through the delay. Your current stream settings are saved and come back if you uninstall.
 pt.WelcomeLabel2=Isto instala o [name/ver] no seu computador.%n%nLigue e desligue o delay da sua live a qualquer momento, com a transmissão no ar, e tenha apagar antes de ir ao ar, replay instantâneo, clipes, multistream e mais, tudo num painel dentro do OBS.%n%nO instalador adiciona o script e o painel Delay dinâmico no OBS e faz o OBS transmitir pelo delay. Sua configuração de transmissão atual fica salva e volta se você desinstalar.
+es.WelcomeLabel2=Esto instala [name/ver] en tu computadora.%n%nActiva y desactiva el delay de tu transmisión en cualquier momento, en pleno directo, y ten borrar antes de salir al aire, repetición instantánea, clips, multistream y más, todo en un panel dentro de OBS.%n%nEl instalador agrega el script y el panel Delay dinámico a OBS y hace que OBS transmita a través del delay. Tu configuración de transmisión actual se guarda y vuelve si desinstalas.
 en.FinishedLabel=[name] is installed. Open OBS: the panel is under Docks > Dynamic Delay. Paste your stream key in its Settings if it was not imported from OBS.
 pt.FinishedLabel=O [name] está instalado. Abra o OBS: o painel fica em Docks > Delay dinâmico. Cole sua chave de transmissão em Configuração se ela não veio do OBS.
+es.FinishedLabel=[name] está instalado. Abre OBS: el panel está en Docks > Delay dinámico. Pega tu clave de transmisión en su Configuración si no se importó de OBS.
 
 en.ClickFinish=
 pt.ClickFinish=
+es.ClickFinish=
 
 [CustomMessages]
 en.Configuring=Setting up OBS (script, panel and stream settings)...
 pt.Configuring=Configurando o OBS (script, painel e transmissão)...
+es.Configuring=Configurando OBS (script, panel y transmisión)...
 en.OpenObs=Open OBS now
 pt.OpenObs=Abrir o OBS agora
+es.OpenObs=Abrir OBS ahora
 en.CloseObs=OBS is open.%n%nClose OBS to continue (it rewrites its settings when it closes), then click Retry.
 pt.CloseObs=O OBS está aberto.%n%nFeche o OBS para continuar (ele regrava as configurações ao fechar) e clique em Repetir.
+es.CloseObs=OBS está abierto.%n%nCierra OBS para continuar (reescribe su configuración al cerrarse) y luego haz clic en Reintentar.
 en.ObsStillOpen=OBS is still open. Close it and run the Setup again.
 pt.ObsStillOpen=O OBS ainda está aberto. Feche e rode o instalador de novo.
+es.ObsStillOpen=OBS sigue abierto. Ciérralo y vuelve a ejecutar el instalador.
 en.NoObs=OBS Studio settings were not found.%n%nInstall OBS Studio (obsproject.com) and open it at least once, then run this Setup again.
 pt.NoObs=Não achei a configuração do OBS Studio.%n%nInstale o OBS Studio (obsproject.com) e abra ele pelo menos uma vez, depois rode este instalador de novo.
+es.NoObs=No se encontró la configuración de OBS Studio.%n%nInstala OBS Studio (obsproject.com) y ábrelo al menos una vez, luego vuelve a ejecutar este instalador.
 en.ConfigFailed=The files were installed, but setting up OBS failed:%n%n%1%n%nRun the Setup again, or see {#Repo}#troubleshooting
 pt.ConfigFailed=Os arquivos foram instalados, mas a configuração do OBS falhou:%n%n%1%n%nRode o instalador de novo, ou veja {#Repo}/blob/main/README.pt-BR.md
+es.ConfigFailed=Los archivos se instalaron, pero la configuración de OBS falló:%n%n%1%n%nVuelve a ejecutar el instalador, o consulta {#Repo}/blob/main/README.es.md
 en.Done=Done in OBS:
 pt.Done=Feito no OBS:
+es.Done=Hecho en OBS:
 en.DeleteSettings=Also delete your Dynamic Delay settings (stream keys, access token, clips folder choice)?%n%nChoose No to keep them for a future install.
 pt.DeleteSettings=Apagar também a configuração do Delay dinâmico (chaves de transmissão, token de acesso, pasta dos clipes)?%n%nEscolha Não para manter para uma próxima instalação.
+es.DeleteSettings=¿Borrar también tu configuración del Delay dinámico (claves de transmisión, token de acceso, carpeta de clips)?%n%nElige No para conservarla para una próxima instalación.
 en.GitHub=Dynamic Delay on GitHub
 pt.GitHub=Delay dinâmico no GitHub
+es.GitHub=Delay dinámico en GitHub
 en.Guide=How to use
 pt.Guide=Como usar
+es.Guide=Cómo usar
 
 [Files]
 Source: "{#Exe}"; DestDir: "{app}"; DestName: "obs-dynamic-delay.exe"; Flags: ignoreversion

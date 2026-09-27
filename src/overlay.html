@@ -28,6 +28,7 @@
   .label { font-weight: 700; font-size: .8125rem; letter-spacing: .08em; text-transform: uppercase; }
   .secs { font-weight: 600; font-size: .9375rem; font-variant-numeric: tabular-nums; letter-spacing: .01em; }
   .label + .secs { opacity: .78; }
+  .timer { font-weight: 600; font-size: .75rem; font-variant-numeric: tabular-nums; opacity: .7; }
   .bar { position: absolute; left: 0; right: 0; bottom: 0; height: 2px; overflow: hidden; opacity: 0; transition: opacity .2s; }
   .bar i { display: block; height: 100%; background: var(--dot); transform-origin: left; transform: scaleX(0); transition: transform .5s linear, background .2s; }
   .w.progress .bar { opacity: 1; }
@@ -46,6 +47,7 @@
   .card .dot { grid-area: dot; }
   .card .label { grid-area: label; font-size: .6875rem; color: var(--muted); }
   .card .secs { grid-area: secs; font-size: 1.75rem; font-weight: 650; opacity: 1; }
+  .card .timer { grid-column: 1 / -1; margin-top: -.25rem; }
   .card .bar { height: 3px; background: var(--line); opacity: 1; }
   .card:not(.progress) .bar { opacity: 0; }
   .card.nolabel { grid-template-areas: "dot secs"; align-items: center; }
@@ -61,13 +63,14 @@
 </head>
 <body>
 <div class="w pill dark hidden" id="w" role="status" aria-live="polite">
-  <span class="dot" id="dot"></span><span class="label" id="label"></span><span class="secs" id="secs"></span><span class="bar"><i id="fill"></i></span>
+  <span class="dot" id="dot"></span><span class="label" id="label"></span><span class="secs" id="secs"></span><span class="timer" id="timer"></span><span class="bar"><i id="fill"></i></span>
 </div>
 <script>
 "use strict";
 const TEXT = {
-  en: { on: "Delay", off: "No delay", adjusting: "Adjusting", replay: "Replay" },
-  pt: { on: "Delay", off: "Sem delay", adjusting: "Ajustando", replay: "Replay" },
+  en: { on: "Delay", off: "No delay", adjusting: "Adjusting", replay: "Replay", timer: (t) => `off in ${t}` },
+  pt: { on: "Delay", off: "Sem delay", adjusting: "Ajustando", replay: "Replay", timer: (t) => `desliga em ${t}` },
+  es: { on: "Delay", off: "Sin delay", adjusting: "Ajustando", replay: "Replay", timer: (t) => `se desactiva en ${t}` },
 };
 const q = new URLSearchParams(location.search);
 const preview = q.get("preview") === "1";
@@ -96,7 +99,8 @@ function render(st) {
   // what the viewers get right now
   let state, secs = st.delay_seconds, progress = 0;
   if (demo) state = demo;
-  else if (!st.live) state = preview ? "on" : "idle"; // sample while offline
+  // not live: the set delay as a sample, so it can be placed and styled in OBS before going live
+  else if (!st.live) state = preview || L.show_offline ? "on" : "idle";
   else if (st.replaying) state = "replay";
   else if (!st.enabled && st.current_ms < 500) state = "off";
   else if (["growing", "filling", "shrinking"].includes(st.phase) || (!st.enabled && st.current_ms >= 500)) state = "adjusting";
@@ -119,6 +123,11 @@ function render(st) {
   $("dot").hidden = !L.show_dot;
   $("label").hidden = !L.show_label;
   $("secs").hidden = !L.show_seconds || state === "off";
+  // auto-off time left (a sample in the panel preview)
+  const left = st.live && !demo ? st.auto_off_s : preview && state === "on" ? 1200 : null;
+  const showTimer = L.show_timer && left != null && state !== "off";
+  $("timer").textContent = showTimer ? T.timer(clock(left)) : "";
+  $("timer").hidden = !showTimer;
   const boxed = L.style !== "minimal";
   const showBar = L.show_progress && (state === "adjusting" || (L.style === "card" && state === "on"));
   w.className = ["w", L.style, boxed ? L.theme : "", showBar ? "progress" : "", L.show_label ? "" : "nolabel", hidden ? "hidden" : ""].join(" ");

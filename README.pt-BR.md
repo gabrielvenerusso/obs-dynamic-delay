@@ -2,7 +2,7 @@
 
 <h1 align="center">Delay Dinâmico para OBS</h1>
 
-[English](README.md) · **Português** · Desenvolvido por [ragnarcb](https://github.com/ragnarcb)
+[English](README.md) · **Português** · [Español](README.es.md) · Desenvolvido por [ragnarcb](https://github.com/ragnarcb) · **[Comunidade no Discord](https://discord.gg/crctbnQ2f8)**
 
 Ligue e desligue o delay da sua live **a qualquer momento, com a transmissão no ar**, e tenha um kit completo em volta dele: apagar o que não pode ir ao ar, replay instantâneo, clipes, multistream, proteção contra queda de conexão e mais. Tudo fica num painel dentro do OBS que você monta do seu jeito.
 
@@ -32,7 +32,8 @@ O "Stream Delay" que já vem no OBS só pode ser mudado com a live parada. Com o
 ## Funcionalidades
 
 **Delay**
-- Liga e desliga o delay com a live no ar, com presets (10, 30, 60, 120 s) e ajuste de ±5 s.
+- Liga e desliga o delay com a live no ar, com seus próprios botões de preset (10, 30, 60, 120 s por padrão; muitos campeonatos pedem de 120 a 300 s) e ajuste de ±5 s.
+- **Desligar sozinho:** o delay desliga depois de 15 a 120 minutos, para não ficar ligado depois da ranqueada.
 - Três jeitos de aplicar: **rebobinar** (sem congelar), mostrar uma **cena do OBS** sua, ou **congelar** a imagem.
 - **Delay por cena:** o delay muda sozinho quando uma cena entra no ar (por exemplo, liga na "Ranqueada" e desliga na "Conversa").
 
@@ -53,7 +54,7 @@ O "Stream Delay" que já vem no OBS só pode ser mudado com a live parada. Com o
 - **Atalhos** do OBS, **plugin do Stream Deck** e **comandos no chat da Twitch** para você e seus mods.
 - **Widget na tela:** um selo minimalista que mostra para quem assiste que o delay está ligado e de quantos segundos, com estilo, tema, textos, cor e tamanho à escolha. Um clique adiciona no OBS.
 - **Saúde da live:** bitrate vindo do OBS, estado de cada destino e um apito quando uma conexão cai.
-- **Português e inglês** em tudo.
+- **Português, inglês e espanhol** em tudo.
 
 **Leve:** nada é re-encodado. O relay só guarda e reenvia o vídeo que o OBS já codificou, com uso de CPU desprezível.
 
@@ -61,7 +62,7 @@ O "Stream Delay" que já vem no OBS só pode ser mudado com a live parada. Com o
 
 > Requisitos: Windows 10/11 e OBS Studio 28 ou mais novo, aberto pelo menos uma vez.
 
-**[Baixar Dynamic-Delay-Setup.exe](https://github.com/ragnarcb/obs-dynamic-delay/releases/latest/download/Dynamic-Delay-Setup.exe)** (sempre a versão mais nova, português e inglês no mesmo arquivo).
+**[Baixar Dynamic-Delay-Setup.exe](https://github.com/ragnarcb/obs-dynamic-delay/releases/latest/download/Dynamic-Delay-Setup.exe)** (sempre a versão mais nova, português, inglês e espanhol no mesmo arquivo).
 
 1. Abra e escolha o idioma. O Windows pode mostrar "O Windows protegeu o computador" enquanto o programa é novo e ainda não tem assinatura digital: clique em **Mais informações > Executar assim mesmo**.
 2. Siga o assistente (boas-vindas, licença, instalar). Não precisa de administrador: instala para o seu usuário do Windows. Se o OBS estiver aberto, o instalador pede para fechar (o OBS regrava as configurações ao fechar).
@@ -193,7 +194,7 @@ Regras como "**Ranqueada** no ar: ligar com 60 s" e "**Conversa**: desligar". As
 
 Ative em **Recursos e painel** e escreva o nome do seu canal no bloco **Comandos no chat da Twitch** (só o nome; um link `twitch.tv/...` também funciona). O relay lê o chat de forma anônima (sem login, sem token) e só aceita comandos de você, dos seus mods, ou também dos VIPs:
 
-`!delay on` · `!delay off` · `!delay 60` (liga com 60 s) · `!delay apagar [s]` · `!delay replay [s]` · `!delay clipe [s]` · `!delay panico` (também em inglês: `on`, `off`, `censor`, `clip`, `panic`).
+`!delay on` · `!delay off` · `!delay 60` (liga com 60 s) · `!delay 60 20m` (liga com 60 s por 20 minutos) · `!delay timer 20` / `!delay timer off` · `!delay apagar [s]` · `!delay replay [s]` · `!delay clipe [s]` · `!delay panico` (também em inglês: `on`, `off`, `censor`, `clip`, `panic`).
 
 ### Deck no celular
 
@@ -235,9 +236,18 @@ Um selo discreto na live que mostra para quem assiste que o delay está ligado, 
 | Textos | suas palavras para ativo, ajustando, replay e desligado (vazio = padrão) |
 | Também | cor, tamanho (50 a 300%), alinhamento, fonte (sans, mono, condensada), tempo como `30s` ou `0:30`, esconder enquanto o delay está desligado |
 
-Estados: **Delay** (ponto vermelho) enquanto o público está atrasado, **Ajustando** (âmbar, com a linha de progresso) enquanto o delay enche ou volta para o ao vivo, **Replay** (azul) durante um replay instantâneo. Some quando você não está ao vivo, e enquanto o delay está desligado, a menos que você desmarque essa opção.
+Estados: **Delay** (ponto vermelho) enquanto o público está atrasado, **Ajustando** (âmbar, com a linha de progresso) enquanto o delay enche ou volta para o ao vivo, **Replay** (azul) durante um replay instantâneo. Com a live desligada ele mostra o delay configurado, para você posicionar e ajustar no OBS antes de entrar ao vivo (desmarque "Mostrar também com a live desligada" para escondê-lo offline, por exemplo ao gravar). Ao vivo, some enquanto o delay está desligado, a menos que você desmarque essa opção.
 
 As mudanças aparecem na live na hora. Para um segundo visual em outra cena, adicione parâmetros no link, com os mesmos nomes das opções: `?style=minimal&scale=150&show_label=0&accent=22c55e`. O campo CSS personalizado da fonte de navegador também funciona. A página é só leitura e não precisa do token: ela só mostra o estado do delay.
+
+### Eventos em tempo real para bots
+
+Bots como Streamer.bot, SAMMI ou Advanced Scene Switcher podem escutar `/api/events` (Server-Sent Events, token em `?token=` ou no cabeçalho `x-dd-token`) e recebem um evento JSON a cada mudança: `delay_on` / `delay_off`, `delay_seconds`, `phase`, `replay_start` / `replay_end`, `censor`, `clip_saved`, `panic_on` / `panic_off`, `destination`, `auto_off_timer` e `auto_off`. A conexão começa com um retrato `hello` e manda um sinal de vida a cada 15 s.
+
+```
+event: delay_off
+data: {"type":"delay_off","delay_seconds":60,"ts":1790481858596}
+```
 
 ## Atalhos
 
@@ -265,6 +275,8 @@ O plugin foi testado com um Stream Deck simulado, ainda não num aparelho de ver
 
 ## Solução de problemas
 
+Não resolveu? Pergunte no [servidor do Discord](https://discord.gg/crctbnQ2f8) (#suporte) ou abra uma issue no GitHub.
+
 | Sintoma | O que fazer |
 |---|---|
 | O painel mostra **RELAY FECHADO** | Normal enquanto o OBS está abrindo. Se continuar, abra **Ferramentas > Scripts**, confira se `obs-dynamic-delay.lua` está na lista e clique em "Reiniciar relay". |
@@ -284,7 +296,7 @@ Ao abrir uma issue, anexe o `obs-dynamic-delay.log`. As chaves de transmissão n
 
 ## Atualizar e desinstalar
 
-O relay consulta o GitHub por uma versão nova quando abre, a cada 6 horas e quando você clica em **Verificar agora** (Configuração > Geral > Atualizações, que também mostra "em dia" e o horário da última consulta). Versão nova aparece como faixa no painel, um aviso e uma linha no status do script no OBS (Ferramentas > Scripts). Com o **Aviso de atualização** desligado em Recursos e painel, nenhuma conexão é feita. Para atualizar, rode o `Dynamic-Delay-Setup.exe` novo: ele instala por cima e mantém sua configuração e suas chaves. Para desinstalar, use **Configurações > Aplicativos > Dynamic Delay for OBS** do Windows: tira o script e o painel, restaura a configuração de transmissão original e pergunta se apaga também a sua configuração. O instalador aceita as opções comuns do Inno Setup (`/SILENT`, `/VERYSILENT`, `/LANG=en|pt`).
+O relay consulta o GitHub por uma versão nova quando abre, a cada 6 horas e quando você clica em **Verificar agora** (Configuração > Geral > Atualizações, que também mostra "em dia" e o horário da última consulta). Versão nova aparece como faixa no painel, um aviso e uma linha no status do script no OBS (Ferramentas > Scripts). Com o **Aviso de atualização** desligado em Recursos e painel, nenhuma conexão é feita. Para atualizar, rode o `Dynamic-Delay-Setup.exe` novo: ele instala por cima e mantém sua configuração e suas chaves. Para desinstalar, use **Configurações > Aplicativos > Dynamic Delay for OBS** do Windows: tira o script e o painel, restaura a configuração de transmissão original e pergunta se apaga também a sua configuração. O instalador aceita as opções comuns do Inno Setup (`/SILENT`, `/VERYSILENT`, `/LANG=en|pt|es`).
 
 ## Segurança
 
@@ -292,7 +304,7 @@ O relay consulta o GitHub por uma versão nova quando abre, a cada 6 horas e qua
 - A API nunca devolve chaves de transmissão nem o token.
 - Por padrão o painel só escuta no seu PC (`127.0.0.1`). O **deck no celular** (desligado por padrão) abre para a sua rede local, ainda protegido pelo token. Um botão do deck só executa a ação salva para ele no editor.
 - Recursos desligados não fazem nada: sem conexão com o chat, sem porta na rede, sem buffers extras.
-- O relay só abre três lugares fixos no seu PC quando pedido (o GitHub do autor, a página de releases e a pasta dos clipes).
+- O relay só abre alguns lugares fixos no seu PC quando pedido (o GitHub do autor, a página de releases, a seção de apoio, o convite do Discord e a pasta dos clipes).
 
 ## Como funciona
 
@@ -321,7 +333,8 @@ OBS ──RTMP──▶ 127.0.0.1:1935 ──▶ motor de delay ──▶ um cli
 
 | Rota | Ação |
 |---|---|
-| `/api/cmd/{cmd}` · `/api/cmd/{cmd}/{arg}` | `toggle`, `on`, `off`, `set/30`, `add/-5`, `censor[/s]`, `replay[/s]`, `clip[/s]`, `panic`, `catchup` |
+| `/api/cmd/{cmd}` · `/api/cmd/{cmd}/{arg}` | `toggle`, `on`, `off`, `set/30`, `add/-5`, `censor[/s]`, `replay[/s]`, `clip[/s]`, `panic`, `catchup`, `autooff/20` (0 = cancela), `onfor/20` (liga por 20 min) |
+| `/api/events` | eventos em tempo real (Server-Sent Events), veja [Eventos em tempo real para bots](#eventos-em-tempo-real-para-bots) |
 | `/api/status` | estado em JSON (delay, motor, destinos, saúde, pânico, último clipe, eventos) |
 | `/api/config` | lê (GET) ou muda (POST JSON, só os campos enviados) a configuração |
 | `/api/obs/configure` · `/api/obs/restore` | pede ao script do OBS para configurar ou restaurar a transmissão |
@@ -357,7 +370,7 @@ Rodar só o relay: `obs-dynamic-delay.exe caminho\config.toml`. Testar o instala
 | `src/clip.rs` | gravação de clipes MP4/FLV |
 | `src/chat.rs` | comandos no chat da Twitch |
 | `src/installer.rs` | instalador com janelas e em texto |
-| `src/i18n.rs` | textos em inglês e português (macro `t!`) |
+| `src/i18n.rs` | textos em inglês, português e espanhol (macro `t!`; texto em espanhol que faltar sai em inglês) |
 | `src/panel.html` | painel; cada bloco é uma entrada em `MODULES`, textos em `TEXT` |
 | `src/deck.html` | deck no celular |
 | `src/overlay.html` | widget na tela (fonte de navegador) |

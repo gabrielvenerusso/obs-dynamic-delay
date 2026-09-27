@@ -68,7 +68,7 @@ fn apply(shared: &Shared, result: Result<String>) -> bool {
             drop(st);
             if tell {
                 log::info!("update available: v{latest} (running v{current})");
-                shared.event("ok", t!("Version {latest} is available (you have {current}).", "A versão {latest} está disponível (você tem a {current})."));
+                shared.event("ok", t!("Version {latest} is available (you have {current}).", "A versão {latest} está disponível (você tem a {current}).", "La versión {latest} está disponible (tienes la {current})."));
             }
             true
         }

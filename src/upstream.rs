@@ -16,8 +16,9 @@ use rml_rtmp::sessions::{
     ClientSession, ClientSessionConfig, ClientSessionEvent, ClientSessionResult, PublishRequestType, StreamMetadata,
 };
 use rml_rtmp::time::RtmpTimestamp;
-use tokio::io::{AsyncReadExt, AsyncWriteExt, ReadHalf, WriteHalf};
+use tokio::io::{AsyncReadExt, AsyncWrite, AsyncWriteExt, BufWriter, ReadHalf, WriteHalf};
 use tokio::net::TcpStream;
+use tokio::sync::mpsc::error::TryRecvError;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use url::Url;
 
@@ -249,11 +250,22 @@ async fn session(shared: Arc<Shared>, id: u64, dest: Dest, mut rx: UnboundedRece
     log::info!("[{}] stream finished", dest.name);
 }
 
-async fn write_results<W: AsyncWriteExt + Unpin>(w: &mut W, results: Vec<ClientSessionResult>) -> Result<Vec<ClientSessionEvent>> {
+/// A write that makes no progress for this long means the connection is dead even
+/// if the OS has not noticed yet (which can take minutes): reconnect instead.
+const WRITE_STALL: Duration = Duration::from_secs(15);
+
+async fn stalled<T>(write: impl Future<Output = std::io::Result<T>>) -> Result<T> {
+    Ok(tokio::time::timeout(WRITE_STALL, write).await.context("network stalled (nothing sent for 15 s)")??)
+}
+
+async fn write_results<W: AsyncWrite + Unpin>(
+    w: &mut W,
+    results: impl IntoIterator<Item = ClientSessionResult>,
+) -> Result<Vec<ClientSessionEvent>> {
     let mut events = Vec::new();
     for r in results {
         match r {
-            ClientSessionResult::OutboundResponse(p) => w.write_all(&p.bytes).await?,
+            ClientSessionResult::OutboundResponse(p) => stalled(w.write_all(&p.bytes)).await?,
             ClientSessionResult::RaisedEvent(e) => events.push(e),
             ClientSessionResult::UnhandleableMessageReceived(_) => {}
         }
@@ -280,13 +292,17 @@ async fn connect(raw_url: &str, key: &str) -> Result<Conn> {
         .await
         .context("timeout connecting")??;
     tcp.set_nodelay(true)?;
-    let mut stream: Box<dyn Io> = if tls {
+    let stream: Box<dyn Io> = if tls {
         let connector = tokio_native_tls::TlsConnector::from(tokio_native_tls::native_tls::TlsConnector::new()?);
         Box::new(connector.connect(&host, tcp).await.context("TLS handshake")?)
     } else {
         Box::new(tcp)
     };
+    negotiate(stream, app, tc_url, key).await
+}
 
+/// RTMP handshake, connect and publish request on an open stream.
+async fn negotiate(mut stream: Box<dyn Io>, app: String, tc_url: String, key: &str) -> Result<Conn> {
     tokio::time::timeout(Duration::from_secs(15), async move {
         let leftover = rtmp_io::handshake(&mut stream, PeerType::Client).await?;
         let mut config = ClientSessionConfig::new();
@@ -294,7 +310,7 @@ async fn connect(raw_url: &str, key: &str) -> Result<Conn> {
         let (mut session, initial) = ClientSession::new(config)?;
         let mut events = write_results(&mut stream, initial).await?;
         let req = session.request_connection(app)?;
-        events.extend(write_results(&mut stream, vec![req]).await?);
+        events.extend(write_results(&mut stream, [req]).await?);
         let res = session.handle_input(&leftover)?;
         events.extend(write_results(&mut stream, res).await?);
 
@@ -306,7 +322,7 @@ async fn connect(raw_url: &str, key: &str) -> Result<Conn> {
                     ClientSessionEvent::ConnectionRequestAccepted if !connected => {
                         connected = true;
                         let req = session.request_publishing(key.to_string(), PublishRequestType::Live)?;
-                        write_results(&mut stream, vec![req]).await?;
+                        write_results(&mut stream, [req]).await?;
                     }
                     ClientSessionEvent::ConnectionRequestRejected { description } => {
                         bail!("server rejected connection: {description}")
@@ -341,11 +357,14 @@ async fn pump(
     id: u64,
     name: &str,
 ) -> Result<Ended> {
-    let (mut session, mut reader, mut writer) = conn;
+    let (mut session, mut reader, writer) = conn;
+    // packets sent back to back (a backlog, audio + video of one tick) go out in
+    // fewer TCP segments / TLS records; flushed before every wait
+    let mut writer = BufWriter::with_capacity(64 * 1024, writer);
 
     if let Some(m) = &out.metadata {
         let r = session.publish_metadata(m)?;
-        write_results(&mut writer, vec![r]).await?;
+        write_results(&mut writer, [r]).await?;
     }
 
     let mut buf = vec![0u8; 16 * 1024];
@@ -354,6 +373,12 @@ async fn pump(
     loop {
         // send everything that is due
         let wake = loop {
+            // take in what the engine sent meanwhile first: while the network is slower
+            // than the stream, the backlog must build up in `out`, which bounds it, not
+            // in the channel
+            if let Some(ended) = drain(rx, &mut session, &mut writer, out, name).await? {
+                return Ok(ended);
+            }
             let (p, wake) = out.next_due(Instant::now());
             let Some(p) = p else { break wake };
             if out.need_key {
@@ -377,9 +402,9 @@ async fn pump(
             trace(name, &p, ts);
             send_packet(&mut session, &mut writer, &p, ts).await?;
         };
-        writer.flush().await?;
+        stalled(writer.flush()).await?;
         if meter.elapsed() >= Duration::from_secs(1) {
-            let kbps = (sent_bytes * 8 / 1000) as u32 * 1000 / meter.elapsed().as_millis().max(1) as u32;
+            let kbps = (sent_bytes as u64 * 8 / meter.elapsed().as_millis().max(1) as u64) as u32;
             let behind = out.span_ms();
             if let Some(o) = shared.status.lock().unwrap().outputs.iter_mut().find(|o| o.id == id) {
                 o.kbps = kbps;
@@ -402,45 +427,81 @@ async fn pump(
                     }
                 }
             }
-            msg = rx.recv() => match msg {
-                None => return Ok(Ended::ChannelClosed),
-                Some(UpMsg::Stop) => {
-                    // flush what is still buffered, then end the stream
-                    out.pacing = None;
-                    while let (Some(p), _) = out.next_due(Instant::now()) {
-                        let ts = out.out_ts(p.ts);
-                        send_packet(&mut session, &mut writer, &p, ts).await?;
-                    }
-                    if let Ok(r) = session.stop_publishing() {
-                        let _ = write_results(&mut writer, r).await;
-                    }
-                    let _ = writer.flush().await;
-                    let _ = writer.shutdown().await;
-                    return Ok(Ended::Stopped);
+            msg = rx.recv() => {
+                if let Some(ended) = on_msg(msg, &mut session, &mut writer, out, name).await? {
+                    return Ok(ended);
                 }
-                Some(UpMsg::Metadata(m)) => {
-                    let r = session.publish_metadata(&m)?;
-                    write_results(&mut writer, vec![r]).await?;
-                    out.metadata = Some(m);
-                }
-                Some(UpMsg::CatchUp) => {
-                    if out.catch_up() {
-                        log::info!("[{name}] caught up with the live delay");
-                    }
-                }
-                Some(UpMsg::Packet(p)) => {
-                    out.push(p);
-                    if out.span_ms() > out.limit_ms {
-                        // network too slow for the bitrate: skip ahead instead of growing without bound
-                        log::warn!("[{name}] network too slow, skipping ahead");
-                        out.catch_up();
-                        out.trim();
-                    }
-                }
-            },
+            }
             _ = sleep => {}
         }
     }
+}
+
+/// Handles every message already waiting in `rx`, without blocking.
+async fn drain<W: AsyncWrite + Unpin>(
+    rx: &mut UnboundedReceiver<UpMsg>,
+    session: &mut ClientSession,
+    writer: &mut W,
+    out: &mut Output,
+    name: &str,
+) -> Result<Option<Ended>> {
+    loop {
+        let msg = match rx.try_recv() {
+            Ok(m) => Some(m),
+            Err(TryRecvError::Empty) => return Ok(None),
+            Err(TryRecvError::Disconnected) => None,
+        };
+        if let Some(ended) = on_msg(msg, session, writer, out, name).await? {
+            return Ok(Some(ended));
+        }
+    }
+}
+
+/// Handles one message from the engine. Returns how the session ended, if it did.
+async fn on_msg<W: AsyncWrite + Unpin>(
+    msg: Option<UpMsg>,
+    session: &mut ClientSession,
+    writer: &mut W,
+    out: &mut Output,
+    name: &str,
+) -> Result<Option<Ended>> {
+    match msg {
+        None => return Ok(Some(Ended::ChannelClosed)),
+        Some(UpMsg::Stop) => {
+            // flush what is still buffered, then end the stream
+            out.pacing = None;
+            while let (Some(p), _) = out.next_due(Instant::now()) {
+                let ts = out.out_ts(p.ts);
+                send_packet(session, writer, &p, ts).await?;
+            }
+            if let Ok(r) = session.stop_publishing() {
+                let _ = write_results(writer, r).await;
+            }
+            let _ = stalled(writer.flush()).await;
+            let _ = stalled(writer.shutdown()).await;
+            return Ok(Some(Ended::Stopped));
+        }
+        Some(UpMsg::Metadata(m)) => {
+            let r = session.publish_metadata(&m)?;
+            write_results(writer, [r]).await?;
+            out.metadata = Some(m);
+        }
+        Some(UpMsg::CatchUp) => {
+            if out.catch_up() {
+                log::info!("[{name}] caught up with the live delay");
+            }
+        }
+        Some(UpMsg::Packet(p)) => {
+            out.push(p);
+            if out.span_ms() > out.limit_ms {
+                // network too slow for the bitrate: skip ahead instead of growing without bound
+                log::warn!("[{name}] network too slow, skipping ahead");
+                out.catch_up();
+                out.trim();
+            }
+        }
+    }
+    Ok(None)
 }
 
 /// `DD_TRACE=<file>`: one line per packet sent (destination, wall ms, kind, timestamp,
@@ -457,9 +518,9 @@ fn trace(name: &str, p: &OutPacket, ts: u32) {
     }
 }
 
-async fn send_packet(
+async fn send_packet<W: AsyncWrite + Unpin>(
     session: &mut ClientSession,
-    writer: &mut WriteHalf<Box<dyn Io>>,
+    writer: &mut W,
     p: &OutPacket,
     ts: u32,
 ) -> Result<()> {
@@ -468,7 +529,7 @@ async fn send_packet(
         Kind::Video => session.publish_video_data(p.data.clone(), ts, false)?,
         Kind::Audio => session.publish_audio_data(p.data.clone(), ts, false)?,
     };
-    write_results(writer, vec![r]).await?;
+    write_results(writer, [r]).await?;
     Ok(())
 }
 
@@ -489,7 +550,7 @@ mod tests {
     fn feed(o: &mut Output, from: u32, to: u32) {
         let mut t = from;
         while t < to {
-            o.push(pkt(Kind::Video, t, t % 2000 == 0));
+            o.push(pkt(Kind::Video, t, t.is_multiple_of(2000)));
             o.push(pkt(Kind::Audio, t + 5, false));
             o.trim();
             t += 40;
@@ -518,6 +579,93 @@ mod tests {
         let (none, wake) = o.next_due(t0);
         assert!(none.is_none());
         assert!(wake.unwrap() > t0);
+    }
+
+    /// Accepts one publisher on `sock` and reads at most `rate` bytes/s once it
+    /// publishes (a slow uplink). Returns how many video frames arrived.
+    async fn slow_server(mut sock: tokio::io::DuplexStream, rate: u64) -> usize {
+        use rml_rtmp::sessions::{ServerSession, ServerSessionConfig, ServerSessionEvent, ServerSessionResult};
+        let leftover = rtmp_io::handshake(&mut sock, PeerType::Server).await.unwrap();
+        let (mut session, initial) = ServerSession::new(ServerSessionConfig::new()).unwrap();
+        let mut results: VecDeque<ServerSessionResult> = initial.into();
+        results.extend(session.handle_input(&leftover).unwrap());
+        let (mut buf, mut frames, mut read) = (vec![0u8; 16 * 1024], 0, None::<(Instant, u64)>);
+        loop {
+            while let Some(r) = results.pop_front() {
+                match r {
+                    ServerSessionResult::OutboundResponse(p) => sock.write_all(&p.bytes).await.unwrap(),
+                    ServerSessionResult::RaisedEvent(ServerSessionEvent::ConnectionRequested { request_id, .. }) => {
+                        results.extend(session.accept_request(request_id).unwrap())
+                    }
+                    ServerSessionResult::RaisedEvent(ServerSessionEvent::PublishStreamRequested { request_id, .. }) => {
+                        read = Some((Instant::now(), 0));
+                        results.extend(session.accept_request(request_id).unwrap())
+                    }
+                    ServerSessionResult::RaisedEvent(ServerSessionEvent::VideoDataReceived { .. }) => frames += 1,
+                    _ => {}
+                }
+            }
+            // token bucket: independent of the timer resolution of the OS
+            let mut max = buf.len();
+            if let Some((t0, total)) = read {
+                let allowed = (rate * t0.elapsed().as_millis() as u64 / 1000).saturating_sub(total) as usize;
+                if allowed < 4096 {
+                    tokio::time::sleep(Duration::from_millis(5)).await;
+                    continue;
+                }
+                max = max.min(allowed);
+            }
+            match sock.read(&mut buf[..max]).await {
+                Ok(0) | Err(_) => return frames,
+                Ok(n) => {
+                    if let Some((_, total)) = &mut read {
+                        *total += n as u64;
+                    }
+                    results.extend(session.handle_input(&buf[..n]).unwrap())
+                }
+            }
+        }
+    }
+
+    /// The network is slower than the stream: the backlog must be dropped (skip
+    /// ahead) instead of piling up without bound in the channel from the engine.
+    #[tokio::test]
+    async fn slow_network_backlog_is_bounded() {
+        let (client, server) = tokio::io::duplex(64 * 1024);
+        let server = tokio::spawn(slow_server(server, 200_000));
+        let conn = negotiate(Box::new(client), "app".into(), "rtmp://test/app".into(), "key").await.unwrap();
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let cfg = crate::config::Config::default();
+        let shared = Shared {
+            status: Mutex::new(crate::status::Status::new(&cfg)),
+            config: Mutex::new(cfg),
+            config_path: Default::default(),
+            bridge: Default::default(),
+            update_now: Default::default(),
+            events: tokio::sync::broadcast::channel(16).0,
+        };
+        let mut out = Output::new(Duration::from_secs(1));
+        // 5 s of a 5 Mbps stream (20 KB frames at 30 fps), produced 2-4x faster than real time
+        let sent = 150u32;
+        let producer = tokio::spawn(async move {
+            for i in 0..sent {
+                let mut data = vec![if i.is_multiple_of(30) { 0x17 } else { 0x27 }, 1, 0, 0, 0];
+                data.resize(20_000, 0);
+                let _ = tx.send(UpMsg::Packet(OutPacket { kind: Kind::Video, ts: i * 33, data: Bytes::from(data) }));
+                tokio::time::sleep(Duration::from_millis(8)).await;
+            }
+            let _ = tx.send(UpMsg::Stop);
+        });
+        let t0 = Instant::now();
+        let ended = pump(conn, &mut rx, &mut out, &shared, 0, "test").await.unwrap();
+        let took = t0.elapsed();
+        producer.await.unwrap();
+        let got = server.await.unwrap();
+        assert!(matches!(ended, Ended::Stopped));
+        eprintln!("slow network: {got}/{sent} frames delivered in {took:?}");
+        // 3 MB cannot go through 200 KB/s in the few seconds the input lasts: most of it is skipped
+        assert!(got < sent as usize / 2, "{got} of {sent} frames sent, backlog was not bounded");
+        assert!(took < Duration::from_secs(8), "took {took:?}");
     }
 
     #[test]

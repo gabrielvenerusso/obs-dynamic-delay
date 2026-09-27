@@ -3,9 +3,9 @@
 use std::collections::VecDeque;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use rml_rtmp::handshake::PeerType;
 use rml_rtmp::sessions::{
     ServerSession, ServerSessionConfig, ServerSessionEvent, ServerSessionResult,
@@ -17,6 +17,14 @@ use tokio::sync::mpsc::UnboundedSender;
 use crate::EngineMsg;
 use crate::flv::Kind;
 use crate::rtmp_io;
+
+/// OBS sends media many times a second: a publisher silent for this long is gone
+/// (network dropped, OBS killed) even if the OS has not closed the socket yet.
+/// Without this a half-open connection keeps the slot and the reconnecting OBS
+/// is rejected as a "second publisher".
+const PUBLISH_IDLE: Duration = Duration::from_secs(10);
+/// Same for a client that connected but never published.
+const IDLE: Duration = Duration::from_secs(30);
 
 pub async fn serve(listen: String, tx: UnboundedSender<EngineMsg>) -> Result<()> {
     let listener = TcpListener::bind(&listen).await?;
@@ -50,7 +58,9 @@ async fn handle(
     publishing: &mut bool,
 ) -> Result<()> {
     sock.set_nodelay(true)?;
-    let leftover = rtmp_io::handshake(&mut sock, PeerType::Server).await?;
+    let leftover = tokio::time::timeout(IDLE, rtmp_io::handshake(&mut sock, PeerType::Server))
+        .await
+        .context("timeout during the RTMP handshake")??;
     let (mut session, initial) = ServerSession::new(ServerSessionConfig::new())?;
     let mut pending: VecDeque<ServerSessionResult> = initial.into();
     pending.extend(session.handle_input(&leftover)?);
@@ -66,7 +76,10 @@ async fn handle(
                 ServerSessionResult::UnhandleableMessageReceived(_) => {}
             }
         }
-        let n = sock.read(&mut buf).await?;
+        let idle = if *publishing { PUBLISH_IDLE } else { IDLE };
+        let n = tokio::time::timeout(idle, sock.read(&mut buf))
+            .await
+            .with_context(|| format!("nothing received for {} s, dropping the connection", idle.as_secs()))??;
         if n == 0 {
             return Ok(());
         }

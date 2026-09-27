@@ -12,11 +12,15 @@ pub const ALL_MODULES: &[&str] = &[
     "delay", "censor", "replay", "clips", "panic", "health", "multistream", "rules", "chat", "phone", "streamdeck", "overlay",
 ];
 pub const DEFAULT_MODULES: &[&str] = &["delay", "censor", "health"];
+pub const DEFAULT_PRESETS: &[u32] = &[10, 30, 60, 120];
 
 /// An extra multistream destination (the main one is `upstream_url` / `stream_key`).
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 #[serde(default)]
 pub struct Destination {
+    /// Stable id, so a destination keeps its saved key when renamed (0 = new,
+    /// given one by [`Config::normalize`]).
+    pub id: u64,
     pub name: String,
     pub url: String,
     pub key: String,
@@ -28,13 +32,13 @@ pub struct Destination {
 
 impl Default for Destination {
     fn default() -> Self {
-        Destination { name: String::new(), url: String::new(), key: String::new(), enabled: true, auto_start: true }
+        Destination { id: 0, name: String::new(), url: String::new(), key: String::new(), enabled: true, auto_start: true }
     }
 }
 
-/// Actions a phone deck key can run. `arg` is seconds, a scene or an audio source.
+/// Actions a phone deck key can run. `arg` is seconds, minutes (`delay.timer`), a scene or an audio source.
 pub const DECK_ACTIONS: &[&str] = &[
-    "delay.toggle", "delay.on", "delay.off", "delay.set", "delay.add", "censor", "replay", "clip", "panic", "catchup",
+    "delay.toggle", "delay.on", "delay.off", "delay.set", "delay.add", "delay.timer", "censor", "replay", "clip", "panic", "catchup",
     "obs.scene", "obs.mute", "obs.stream", "obs.record", "dest.toggle",
 ];
 
@@ -54,6 +58,10 @@ pub struct Overlay {
     pub show_progress: bool,
     /// Hidden while the delay is off (else shows the "off" text).
     pub hide_when_off: bool,
+    /// Time left on the auto-off timer, while it runs.
+    pub show_timer: bool,
+    /// Visible while not live too (shows the set delay), to place and style it in OBS.
+    pub show_offline: bool,
     /// Custom texts (empty = default text in the panel language).
     pub label_on: String,
     pub label_off: String,
@@ -81,6 +89,8 @@ impl Default for Overlay {
             show_seconds: true,
             show_progress: true,
             hide_when_off: true,
+            show_timer: false,
+            show_offline: true,
             label_on: String::new(),
             label_off: String::new(),
             label_adjusting: String::new(),
@@ -234,7 +244,7 @@ impl Default for TwitchChat {
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 #[serde(default)]
 pub struct Config {
-    /// "en" or "pt": language of the panel, the OBS script and messages.
+    /// "en", "pt" or "es": language of the panel, the OBS script and messages.
     pub language: String,
     /// Address OBS streams to.
     pub listen: String,
@@ -252,6 +262,8 @@ pub struct Config {
     pub delay_scene: String,
     pub max_delay_seconds: u32,
     pub filler_fps: u32,
+    /// Delay buttons of the panel, in seconds (1 to 6 of them).
+    pub presets: Vec<u32>,
 
     /// "Delete before it airs": seconds removed from the delay buffer.
     pub censor_seconds: u32,
@@ -313,6 +325,7 @@ impl Default for Config {
             delay_scene: String::new(),
             max_delay_seconds: 600,
             filler_fps: 2,
+            presets: DEFAULT_PRESETS.to_vec(),
             censor_seconds: 10,
             replay_seconds: 10,
             clip_seconds: 30,
@@ -348,16 +361,22 @@ const HEADER: &str = "# obs-dynamic-delay configuration.
 
 impl Config {
     /// Loads the config, writing the default one first if the file does not exist.
-    /// Also fills in a random API token when there is none.
+    /// Also fills in a random API token and destination ids when missing.
     pub fn load_or_create(path: &Path) -> Result<Config> {
         if !path.exists() {
             Config::default().save(path)?;
         }
         let text = std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
         let mut cfg: Config = toml::from_str(&text).with_context(|| format!("parsing {}", path.display()))?;
+        let ids: Vec<u64> = cfg.destinations.iter().map(|d| d.id).collect();
         cfg.normalize();
+        // saved when destinations got their ids, so the panel keeps seeing the same ones
+        let mut changed = cfg.destinations.iter().map(|d| d.id).ne(ids);
         if cfg.api_token.is_empty() {
             cfg.api_token = new_token();
+            changed = true;
+        }
+        if changed {
             cfg.save(path)?;
         }
         Ok(cfg)
@@ -365,6 +384,7 @@ impl Config {
 
     /// Keeps values in their valid ranges.
     pub fn normalize(&mut self) {
+        self.language = crate::i18n::Lang::parse(&self.language).code().into();
         self.max_delay_seconds = self.max_delay_seconds.max(1);
         self.delay_seconds = self.delay_seconds.min(self.max_delay_seconds);
         self.clip_seconds = self.clip_seconds.clamp(5, 120);
@@ -372,6 +392,7 @@ impl Config {
         self.censor_seconds = self.censor_seconds.clamp(1, 120);
         self.outage_buffer_seconds = self.outage_buffer_seconds.min(300);
         self.filler_fps = self.filler_fps.clamp(1, 30);
+        self.presets = normalize_presets(&self.presets, self.max_delay_seconds);
         if !["rewind", "scene", "freeze"].contains(&self.grow_mode.as_str()) {
             self.grow_mode = "rewind".into();
         }
@@ -390,6 +411,7 @@ impl Config {
         self.deck.keys.retain(|k| DECK_ACTIONS.contains(&k.action.as_str()));
         self.deck.keys.truncate(48);
         self.overlay.normalize();
+        self.number_destinations();
         self.panel_collapsed.retain(|m| ALL_MODULES.contains(&m.as_str()));
         self.panel_collapsed.dedup();
         let mut seen = Vec::new();
@@ -397,6 +419,21 @@ impl Config {
             seen.push(m.clone());
             true
         });
+    }
+
+    /// Gives every destination a unique id (new ones, copies and ids that do not
+    /// fit a JavaScript number or TOML integer get the next free one).
+    fn number_destinations(&mut self) {
+        const MAX_ID: u64 = (1 << 53) - 1;
+        let mut next = self.destinations.iter().map(|d| d.id).filter(|&id| id <= MAX_ID).max().unwrap_or(0) + 1;
+        let mut seen = std::collections::HashSet::new();
+        for d in &mut self.destinations {
+            if d.id == 0 || d.id > MAX_ID || !seen.insert(d.id) {
+                d.id = next;
+                next += 1;
+                seen.insert(d.id);
+            }
+        }
     }
 
     pub fn save(&self, path: &Path) -> Result<()> {
@@ -435,6 +472,24 @@ impl Config {
     }
 }
 
+/// Delay presets: the first 6 distinct values within 1..=max, sorted.
+pub fn normalize_presets(presets: &[u32], max: u32) -> Vec<u32> {
+    let mut v: Vec<u32> = Vec::new();
+    for &s in presets.iter().filter(|&&s| (1..=max).contains(&s)) {
+        if !v.contains(&s) && v.len() < 6 {
+            v.push(s);
+        }
+    }
+    v.sort_unstable();
+    if v.is_empty() {
+        v = DEFAULT_PRESETS.iter().copied().filter(|&s| s <= max).collect();
+    }
+    if v.is_empty() {
+        v.push(max);
+    }
+    v
+}
+
 fn new_token() -> String {
     let s = std::collections::hash_map::RandomState::new();
     let a = s.hash_one(std::process::id());
@@ -469,7 +524,7 @@ mod tests {
         let mut c = Config::default();
         c.stream_key = r#"a"b\c"#.into();
         c.start_enabled = true;
-        c.destinations.push(Destination { name: "YT".into(), url: YOUTUBE_URL.into(), key: "k".into(), enabled: false, auto_start: true });
+        c.destinations.push(Destination { id: 3, name: "YT".into(), url: YOUTUBE_URL.into(), key: "k".into(), enabled: false, auto_start: true });
         c.scene_rules.push(SceneRule { scene: "Ranked".into(), action: "set:60".into() });
         let text = format!("{HEADER}{}", toml::to_string_pretty(&c).unwrap());
         let parsed: Config = toml::from_str(&text).unwrap();
@@ -523,6 +578,23 @@ mod tests {
     }
 
     #[test]
+    fn presets_are_kept_valid() {
+        let mut c = Config::default();
+        assert_eq!(c.presets, [10, 30, 60, 120]);
+        c.presets = vec![300, 0, 60, 60, 5, 900, 120, 180, 240, 30, 15];
+        c.normalize();
+        assert_eq!(c.presets, [5, 60, 120, 180, 240, 300], "first 6 distinct in range, sorted");
+        c.presets.clear();
+        c.normalize();
+        assert_eq!(c.presets, [10, 30, 60, 120]);
+        assert_eq!(normalize_presets(&[], 45), [10, 30]);
+        assert_eq!(normalize_presets(&[], 5), [5]);
+        // older configs get the default presets
+        let old: Config = toml::from_str("delay_seconds = 45").unwrap();
+        assert_eq!(old.presets, [10, 30, 60, 120]);
+    }
+
+    #[test]
     fn creates_token() {
         let dir = std::env::temp_dir().join(format!("dd-cfg-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
@@ -547,6 +619,22 @@ mod tests {
     }
 
     #[test]
+    fn destinations_get_unique_ids() {
+        let mut c = Config::default();
+        let d = |id: u64| Destination { id, url: YOUTUBE_URL.into(), ..Destination::default() };
+        c.destinations = vec![d(0), d(5), d(5), d(0), d(u64::MAX)];
+        c.normalize();
+        let ids: Vec<u64> = c.destinations.iter().map(|d| d.id).collect();
+        assert_eq!(ids, vec![6, 5, 7, 8, 9]);
+        c.normalize();
+        assert_eq!(c.destinations.iter().map(|d| d.id).collect::<Vec<_>>(), ids, "stable once given");
+        // an old config without ids gets them too
+        let mut old: Config = toml::from_str("[[destinations]]\nname = \"YT\"\nurl = \"rtmp://a/b\"\n").unwrap();
+        old.normalize();
+        assert_eq!(old.destinations[0].id, 1);
+    }
+
+    #[test]
     fn overlay_values_are_kept_valid() {
         let mut c = Config::default();
         c.overlay.style = "neon".into();
@@ -562,5 +650,16 @@ mod tests {
         let old: Config = toml::from_str("language = \"pt\"").unwrap();
         assert_eq!(old.overlay, Overlay::default());
         assert!(old.features.overlay);
+        assert!(!old.overlay.show_timer);
+        assert!(old.overlay.show_offline);
+    }
+
+    #[test]
+    fn language_is_kept_valid() {
+        for (typed, kept) in [("es", "es"), ("es-MX", "es"), ("pt-BR", "pt"), ("en", "en"), ("xx", crate::i18n::DEFAULT.code())] {
+            let mut c = Config { language: typed.into(), ..Config::default() };
+            c.normalize();
+            assert_eq!(c.language, kept, "{typed}");
+        }
     }
 }
