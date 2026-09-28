@@ -70,12 +70,33 @@ pub fn video_cts(d: &[u8]) -> i64 {
     }
 }
 
+/// Enhanced RTMP audio packet type of a multitrack packet (low nibble of the first byte).
+const AUDIO_PACKET_MULTITRACK: u8 = 5;
+
 pub fn audio_is_sequence_header(d: &[u8]) -> bool {
     let Some(&b0) = d.first() else { return false };
     match b0 >> 4 {
         10 => d.get(1) == Some(&0),
+        // multitrack: the packet type of the tracks is in the next byte (0 = SequenceStart)
+        9 if b0 & 0x0F == AUDIO_PACKET_MULTITRACK => d.get(1).is_some_and(|b| b & 0x0F == 0),
         9 => b0 & 0x0F == 0,
         _ => false,
+    }
+}
+
+/// Audio track of a tag: 0 for the main track (legacy FLV or single-track Enhanced RTMP),
+/// else the id of an Enhanced RTMP multitrack packet. OBS sends the Twitch VOD track this
+/// way (track 1): `0x95`, `0x0N` (one track, packet type N), FourCC, track id, payload.
+pub fn audio_track(d: &[u8]) -> u8 {
+    match (d.first(), d.get(1)) {
+        (Some(&b0), Some(&b1)) if b0 >> 4 == 9 && b0 & 0x0F == AUDIO_PACKET_MULTITRACK => {
+            if b1 >> 4 == 0 {
+                d.get(6).copied().unwrap_or(1).max(1)
+            } else {
+                1 // several tracks in one packet: kept together as an extra track
+            }
+        }
+        _ => 0,
     }
 }
 
@@ -111,11 +132,7 @@ pub fn parse_aac_config(d: &[u8]) -> Option<AacInfo> {
 
 /// A raw AAC-LC frame (1024 samples) that decodes to digital silence.
 pub fn silent_aac_frame(info: &AacInfo) -> Bytes {
-    let raw: &[u8] = if info.channels == 1 {
-        &[0x01, 0x40, 0x20, 0x07]
-    } else {
-        &[0x21, 0x10, 0x04, 0x60, 0x8C, 0x1C]
-    };
+    let raw = silent_aac_raw(info.channels);
     let mut v = Vec::with_capacity(raw.len() + 2);
     v.push(info.header_byte);
     v.push(1); // AACPacketType = raw
@@ -123,9 +140,63 @@ pub fn silent_aac_frame(info: &AacInfo) -> Bytes {
     Bytes::from(v)
 }
 
+fn silent_aac_raw(channels: u8) -> &'static [u8] {
+    if channels == 1 { &[0x01, 0x40, 0x20, 0x07] } else { &[0x21, 0x10, 0x04, 0x60, 0x8C, 0x1C] }
+}
+
+/// AAC config of an extra (multitrack, one track) audio track's SequenceStart.
+pub fn parse_multitrack_aac(d: &[u8]) -> Option<(u8, AacInfo)> {
+    if audio_track(d) == 0 || !audio_is_sequence_header(d) || d.get(1)? >> 4 != 0 || d.get(2..6)? != b"mp4a" {
+        return None;
+    }
+    // same AudioSpecificConfig as a legacy header, after the 7 byte multitrack prefix
+    let mut legacy = vec![0xAF, 0];
+    legacy.extend_from_slice(d.get(7..)?);
+    Some((d[6], parse_aac_config(&legacy)?))
+}
+
+/// A silent AAC frame for an extra audio track (the Twitch VOD track).
+pub fn silent_multitrack_frame(track: u8, info: &AacInfo) -> Bytes {
+    let mut v = vec![0x95, 0x01, b'm', b'p', b'4', b'a', track];
+    v.extend_from_slice(silent_aac_raw(info.channels));
+    Bytes::from(v)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // what OBS 30.2+ sends for the Twitch VOD track (flv_packet_audio_ex, track 1)
+    const MT_START: [u8; 9] = [0x95, 0x00, b'm', b'p', b'4', b'a', 1, 0x11, 0x90];
+    const MT_FRAME: [u8; 8] = [0x95, 0x01, b'm', b'p', b'4', b'a', 1, 0x21];
+
+    #[test]
+    fn vod_track_packets() {
+        assert_eq!(audio_track(&MT_START), 1);
+        assert_eq!(audio_track(&MT_FRAME), 1);
+        assert!(audio_is_sequence_header(&MT_START));
+        assert!(!audio_is_sequence_header(&MT_FRAME));
+        // the main track is untouched
+        assert_eq!(audio_track(&[0xAF, 0x00, 0x11, 0x90]), 0);
+        assert_eq!(audio_track(&[0xAF, 0x01, 0x21]), 0);
+        assert!(audio_is_sequence_header(&[0xAF, 0x00, 0x11, 0x90]));
+        assert_eq!(parse_aac_config(&MT_START), None);
+        // single-track Enhanced audio (packet type 0 = SequenceStart) is still the main track
+        assert_eq!(audio_track(&[0x90, b'm', b'p', b'4', b'a']), 0);
+        assert!(audio_is_sequence_header(&[0x90, b'm', b'p', b'4', b'a']));
+        // a real VOD track header (ffmpeg's Enhanced RTMP multitrack output, AAC-LC 44.1 kHz mono)
+        let real = [0x95, 0x00, b'm', b'p', b'4', b'a', 0x01, 0x12, 0x08, 0x56, 0xe5, 0x00];
+        let (track, info) = parse_multitrack_aac(&real).expect("VOD track config");
+        assert_eq!((track, info.sample_rate, info.channels), (1, 44100, 1));
+        let silent = silent_multitrack_frame(1, &info);
+        assert_eq!(audio_track(&silent), 1);
+        assert!(!audio_is_sequence_header(&silent));
+        assert_eq!(parse_multitrack_aac(&MT_FRAME), None);
+        // truncated input never panics
+        for n in 0..MT_START.len() {
+            let _ = (audio_track(&MT_START[..n]), audio_is_sequence_header(&MT_START[..n]));
+        }
+    }
 
     #[test]
     fn detects_avc() {

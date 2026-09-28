@@ -1,6 +1,6 @@
 [package]
 name = "obs-dynamic-delay"
-version = "0.12.1"
+version = "0.13.0"
 edition = "2024"
 description = "Dynamic stream delay for OBS: switch the delay on and off while live"
 readme = "README.md"
@@ -25,7 +25,7 @@ mp4 = "0.14.0"
 qrcode = { version = "0.14.1", default-features = false, features = ["svg"] }
 rml_rtmp = "0.8.0"
 serde = { version = "1.0.229", features = ["derive"] }
-serde_json = { version = "1.0.151", features = ["preserve_order"] }
+serde_json = { version = "1.0.151", features = ["preserve_order", "float_roundtrip"] }
 tokio = { version = "1.53.1", features = ["full"] }
 tokio-native-tls = "0.3.1"
 toml = "1.1.6"

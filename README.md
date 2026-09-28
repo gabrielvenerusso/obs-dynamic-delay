@@ -413,7 +413,7 @@ The workflow (`.github/workflows/release.yml`) runs the tests, builds `dist/Dyna
 
 ## Known limitations
 
-- **Twitch VOD track and connected account:** while Dynamic Delay is installed, OBS streams to a custom server (the relay), so OBS hides the options that only exist with the Twitch service: the **Twitch VOD track** (a separate audio track for the VOD, often used to keep music out of it), the connected account and its docks. If you rely on the VOD track to keep copyrighted music out of your VODs, mute that music some other way while you use Dynamic Delay. Uninstalling the right way brings these options back.
+- **Connected account:** while Dynamic Delay is installed, OBS streams to a custom server (the relay), so the Twitch/Kick account connection and its docks are not available in OBS. The **Twitch VOD track** does work (OBS 30.2 or newer): the Setup turns on the OBS switch that shows it on a custom server (**Settings > Output > Streaming**), and the relay sends it with the delay. Do a short test stream and check the VOD once after turning it on.
 - Tested end to end locally (ffmpeg as OBS and as the platforms, a simulated OBS and Stream Deck). Do a test stream on your platform before an important one: [docs/TESTING.md](docs/TESTING.md).
 - RTMP/RTMPS only. WHIP, SRT and Twitch's "Enhanced Broadcasting" (multitrack) do not go through the relay.
 - The delay changes at keyframes (about 2 s with OBS' default interval).

@@ -355,7 +355,9 @@ fn install(p: &Paths, interactive: bool) -> Result<Config> {
             .unwrap_or_default();
         docks.retain(|d| !is_our_dock(d));
         docks.push(json!({ "title": dock_title(), "url": dock_url, "uuid": uuid() }));
-        ini_set(t, "BasicWindow", "ExtraBrowserDocks", &Value::Array(docks).to_string())
+        let t = ini_set(t, "BasicWindow", "ExtraBrowserDocks", &Value::Array(docks).to_string());
+        // OBS 30+ hides the Twitch VOD track on a custom server unless this is set
+        ini_set(&t, "General", "EnableCustomServerVodTrack", "true")
     })?;
     let dock = dock_title();
     step(&t!("\"{dock}\" panel added (Docks menu)", "painel \"{dock}\" adicionado (menu Docks)", "panel \"{dock}\" agregado (menú Docks)"));
@@ -372,30 +374,39 @@ fn install(p: &Paths, interactive: bool) -> Result<Config> {
 }
 
 fn uninstall(p: &Paths) -> Result<()> {
-    let lua = p.lua();
     for c in p.scene_collections() {
         let mut v = read_json(&c)?;
-        if let Some(i) = script_index(&v, &lua) {
-            v["modules"]["scripts-tool"].as_array_mut().unwrap().remove(i);
-            write_json(&c, &v)?;
+        // this script from any folder: also copies left by an old install or a folder moved by hand
+        if let Some(arr) = v["modules"]["scripts-tool"].as_array_mut() {
+            let before = arr.len();
+            arr.retain(|s| !s["path"].as_str().unwrap_or("").replace('\\', "/").to_lowercase().ends_with("/obs-dynamic-delay.lua"));
+            if arr.len() != before {
+                write_json(&c, &v)?;
+            }
         }
     }
     step(&t!("script removed from OBS", "script removido do OBS", "script eliminado de OBS"));
+    // the VOD track switch as it was before the install (not there = removed again)
+    let vod_flag_before = std::fs::read_to_string(backup_of(&p.user_ini()))
+        .ok()
+        .and_then(|t| ini_get(t.trim_start_matches('\u{feff}'), "General", "EnableCustomServerVodTrack"));
     if p.user_ini().exists() {
         edit_ini(&p.user_ini(), |t| {
             let mut docks: Vec<Value> = ini_get(t, "BasicWindow", "ExtraBrowserDocks")
                 .and_then(|s| serde_json::from_str(&s).ok())
                 .unwrap_or_default();
             docks.retain(|d| !is_our_dock(d));
-            ini_set(t, "BasicWindow", "ExtraBrowserDocks", &Value::Array(docks).to_string())
+            let t = ini_set(t, "BasicWindow", "ExtraBrowserDocks", &Value::Array(docks).to_string());
+            match &vod_flag_before {
+                Some(v) => ini_set(&t, "General", "EnableCustomServerVodTrack", v),
+                None => ini_remove(&t, "General", "EnableCustomServerVodTrack"),
+            }
         })?;
         step(&t!("panel removed", "painel removido", "panel eliminado"));
     }
     // every profile that streams to the relay gets its own original settings back
-    let listen = std::fs::read_to_string(p.config())
-        .ok()
-        .and_then(|t| toml::from_str::<Config>(&t).ok())
-        .map_or_else(|| Config::default().listen, |c| c.listen);
+    let saved = std::fs::read_to_string(p.config()).ok().and_then(|t| toml::from_str::<Config>(&t).ok());
+    let listen = saved.as_ref().map_or_else(|| Config::default().listen, |c| c.listen.clone());
     let mut restored = 0;
     for prof in p.profiles() {
         let svc = prof.join("service.json");
@@ -409,6 +420,11 @@ fn uninstall(p: &Paths) -> Result<()> {
             } else if current && p.service_backup().exists() {
                 // installs made before the copy in the profile existed
                 std::fs::copy(p.service_backup(), &svc)?;
+                restored += 1;
+            } else if let Some(c) = &saved {
+                // no copy at all (removed by hand, or an old test install): stream straight to
+                // the relay's own destination instead of a relay that is gone
+                write_json(&svc, &service_for(&c.upstream_url, &c.stream_key))?;
                 restored += 1;
             }
         }
@@ -567,6 +583,15 @@ fn write_json(p: &Path, v: &Value) -> Result<()> {
     std::fs::write(p, serde_json::to_string_pretty(v)?).with_context(|| format!("writing {}", p.display()))
 }
 
+/// OBS stream settings that go straight to `url` (the Twitch service itself for Twitch).
+fn service_for(url: &str, key: &str) -> Value {
+    if url.trim_end_matches('/') == crate::config::TWITCH_URL {
+        json!({ "type": "rtmp_common", "settings": { "service": "Twitch", "server": "auto", "key": key } })
+    } else {
+        json!({ "type": "rtmp_custom", "settings": { "server": url, "key": key, "use_auth": false, "bwtest": false } })
+    }
+}
+
 fn backup_of(p: &Path) -> PathBuf {
     PathBuf::from(format!("{}.dd-backup", p.display()))
 }
@@ -657,6 +682,26 @@ pub fn ini_get(text: &str, section: &str, key: &str) -> Option<String> {
 }
 
 /// Sets `key=value` inside `[section]`, adding the key or the section when missing.
+/// Removes `key` from `[section]`.
+pub fn ini_remove(text: &str, section: &str, key: &str) -> String {
+    let nl = if text.contains("\r\n") { "\r\n" } else { "\n" };
+    let header = format!("[{section}]");
+    let mut in_section = false;
+    let mut out: Vec<&str> = Vec::new();
+    for line in text.lines() {
+        let l = line.trim();
+        if l.starts_with('[') {
+            in_section = l == header;
+        } else if in_section && l.split_once('=').is_some_and(|(k, _)| k.trim() == key) {
+            continue;
+        }
+        out.push(line);
+    }
+    let mut s = out.join(nl);
+    s.push_str(nl);
+    s
+}
+
 pub fn ini_set(text: &str, section: &str, key: &str, value: &str) -> String {
     let nl = if text.contains("\r\n") { "\r\n" } else { "\n" };
     let header = format!("[{section}]");
@@ -742,6 +787,9 @@ mod tests {
         install(&p, false).unwrap();
         let svc = read_json(&prof.join("service.json")).unwrap();
         assert_eq!(svc["type"], "rtmp_custom");
+        // OBS shows and sends the Twitch VOD track on the custom server
+        let user = std::fs::read_to_string(obs.join("user.ini")).unwrap();
+        assert_eq!(ini_get(&user, "General", "EnableCustomServerVodTrack").as_deref(), Some("true"));
         // what the OBS script does on the first Twitch stream (with its backup of the encoder)
         std::fs::copy(prof.join("streamEncoder.json"), prof.join("streamEncoder.json.dd-backup")).unwrap();
         std::fs::write(prof.join("streamEncoder.json"), r#"{"bitrate":6000,"rate_control":"CBR","keyint_sec":2}"#).unwrap();
@@ -763,6 +811,8 @@ mod tests {
         assert_eq!(scene["modules"]["scripts-tool"].as_array().map(|a| a.len()), Some(0));
         let user = std::fs::read_to_string(obs.join("user.ini")).unwrap();
         assert!(!user.contains(dock_title()) || !user.contains("dock.html"));
+        // it was not set before the install: gone again
+        assert_eq!(ini_get(&user, "General", "EnableCustomServerVodTrack"), None);
         let leftovers: Vec<_> = walk(&obs).into_iter().filter(|f| f.to_string_lossy().ends_with(".dd-backup")).collect();
         assert!(leftovers.is_empty(), "backup files left: {leftovers:?}");
         let _ = std::fs::remove_dir_all(&root);
@@ -775,6 +825,42 @@ mod tests {
             if p.is_dir() { out.extend(walk(&p)) } else { out.push(p) }
         }
         out
+    }
+
+    /// No copy of the original stream settings anywhere: OBS goes straight to the destination.
+    #[test]
+    fn uninstall_without_any_backup_streams_direct() {
+        let root = std::env::temp_dir().join(format!("dd-nobackup-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let obs = root.join("obs-studio");
+        let prof = obs.join("basic/profiles/Main");
+        std::fs::create_dir_all(&prof).unwrap();
+        std::fs::create_dir_all(obs.join("basic/scenes")).unwrap();
+        std::fs::write(obs.join("user.ini"), "[Basic]\r\nProfileDir=Main\r\n").unwrap();
+        let relay = r#"{"type":"rtmp_custom","settings":{"server":"rtmp://127.0.0.1:1935/live","key":"delay"}}"#;
+        std::fs::write(prof.join("service.json"), relay).unwrap();
+        let p = Paths { obs_dir: obs.clone(), install_dir: root.join("obs-dynamic-delay") };
+        std::fs::create_dir_all(&p.install_dir).unwrap();
+        let cfg = Config { stream_key: "live_abc".into(), ..Config::default() };
+        cfg.save(&p.config()).unwrap();
+        uninstall(&p).unwrap();
+        let svc = read_json(&prof.join("service.json")).unwrap();
+        assert_eq!(svc["type"], "rtmp_common");
+        assert_eq!(svc["settings"]["service"], "Twitch");
+        assert_eq!(svc["settings"]["key"], "live_abc");
+        assert_eq!(service_for("rtmps://fa723fc1b171.global-contribute.live-video.net/app", "sk")["settings"]["server"],
+            "rtmps://fa723fc1b171.global-contribute.live-video.net/app");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn ini_removes_only_that_key() {
+        let t = "[General]\r\nA=1\r\nB=2\r\n\r\n[Other]\r\nB=3\r\n";
+        let o = ini_remove(t, "General", "B");
+        assert_eq!(ini_get(&o, "General", "B"), None);
+        assert_eq!(ini_get(&o, "General", "A").as_deref(), Some("1"));
+        assert_eq!(ini_get(&o, "Other", "B").as_deref(), Some("3"));
+        assert!(o.contains("\r\n"));
     }
 
     #[test]

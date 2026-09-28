@@ -2,6 +2,20 @@
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [SemVer](https://semver.org/).
 
+## [0.13.0] - 2026-09-28
+
+### Added
+
+- **Twitch VOD track works with Dynamic Delay.** The Setup turns on OBS' own switch that shows and sends the VOD track on a custom server (`EnableCustomServerVodTrack`, OBS 30 or newer), and the relay forwards the second audio track (Enhanced RTMP multitrack audio, OBS 30.2 or newer) with the same delay: delete before it airs, replay, rewind, freeze (with silence of its own) and multistream destinations started mid-stream included. Clips keep only the stream's own audio. Uninstalling puts the switch back as it was.
+- `scripts/e2e-vod-track.sh`: end-to-end test with a VOD track (ffmpeg plays OBS and the platform).
+
+### Fixed
+
+- A second audio track sent by OBS was taken for a normal audio frame: its codec header was dropped at stream start and never sent to a destination that started mid-stream, and it could be written into clips.
+- Uninstalling with no copy of the original stream settings left (an install whose copy was removed or consumed) left OBS streaming to the relay that was gone: OBS now goes straight to the destination (the Twitch service itself for Twitch).
+- Uninstalling removes the script from every folder it was loaded from (copies left by an old install or a moved folder), not only the current one.
+- Settings files keep their decimal numbers exactly (JSON floats are read and written back bit for bit).
+
 ## [0.12.1] - 2026-09-28
 
 ### Fixed

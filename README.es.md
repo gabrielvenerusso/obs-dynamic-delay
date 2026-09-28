@@ -415,7 +415,7 @@ El workflow (`.github/workflows/release.yml`) ejecuta las pruebas, compila `dist
 
 ## Limitaciones conocidas
 
-- **Pista de audio del VOD de Twitch y cuenta conectada:** con Dynamic Delay instalado, OBS transmite a un servidor personalizado (el relay), así que OBS oculta las opciones que solo existen con el servicio Twitch: la **pista de audio del VOD** (una pista de audio aparte para el VOD, muy usada para dejar la música fuera), la cuenta conectada y sus paneles. Si dependes de esa pista para que la música con derechos no quede en el VOD, silénciala de otra forma mientras usas Dynamic Delay. Desinstalar de la forma correcta devuelve esas opciones.
+- **Cuenta conectada:** con Dynamic Delay instalado, OBS transmite a un servidor personalizado (el relay), así que la conexión de la cuenta de Twitch/Kick y sus paneles no están disponibles en OBS. La **pista de audio del VOD** de Twitch sí funciona (OBS 30.2 o más nuevo): el instalador activa la opción de OBS que la muestra con servidor personalizado (**Configuración > Salida > Emisión**), y el relay la envía con el retraso. Haz un directo corto de prueba y revisa el VOD una vez después de activarla.
 - Probado de extremo a extremo en local (ffmpeg como OBS y como las plataformas, un OBS y un Stream Deck simulados). Haz una transmisión de prueba en tu plataforma antes de una importante: [docs/TESTING.md](docs/TESTING.md).
 - Solo RTMP/RTMPS. WHIP, SRT y la "Transmisión mejorada" (multipista) de Twitch no pasan por el relay.
 - El delay cambia en los keyframes (unos 2 s con el intervalo predeterminado de OBS).

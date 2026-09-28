@@ -413,7 +413,7 @@ O workflow (`.github/workflows/release.yml`) roda os testes, gera o `dist/Dynami
 
 ## Limitações conhecidas
 
-- **Faixa de áudio da VOD da Twitch e conta conectada:** com o Dynamic Delay instalado, o OBS transmite para um servidor personalizado (o relay), então o OBS esconde as opções que só existem com o serviço Twitch: a **Faixa de áudio da VOD** (uma trilha de áudio separada para a VOD, muito usada para tirar música dela), a conta conectada e os docks dela. Se você depende da faixa da VOD para a música com direitos autorais não ir para a VOD, silencie essa música de outro jeito enquanto usa o Dynamic Delay. Desinstalar do jeito certo traz essas opções de volta.
+- **Conta conectada:** com o Dynamic Delay instalado, o OBS transmite para um servidor personalizado (o relay), então a conexão da conta da Twitch/Kick e os docks dela não ficam disponíveis no OBS. A **Faixa de áudio da VOD** da Twitch funciona (OBS 30.2 ou mais novo): o instalador liga a opção do OBS que mostra essa faixa com servidor personalizado (**Configurações > Saída > Transmissão**), e o relay envia com o delay. Faça uma live curta de teste e confira a VOD uma vez depois de ligar.
 - Testado de ponta a ponta localmente (ffmpeg fazendo o papel do OBS e das plataformas, OBS e Stream Deck simulados). Faça uma live de teste na sua plataforma antes de uma importante: [docs/TESTING.md](docs/TESTING.md).
 - Só RTMP/RTMPS. WHIP, SRT e a "Transmissão aprimorada" (multitrack) da Twitch não passam pelo relay.
 - O delay muda em quadros-chave (cerca de 2 s com o intervalo padrão do OBS).

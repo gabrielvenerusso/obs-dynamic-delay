@@ -55,6 +55,8 @@ struct Output {
     metadata: Option<StreamMetadata>,
     video_header: Option<OutPacket>,
     audio_header: Option<OutPacket>,
+    /// Headers of the extra audio tracks (the Twitch VOD track), by track id.
+    extra_headers: Vec<(u8, OutPacket)>,
     /// Longest span kept while disconnected or while the network is too slow.
     limit_ms: u32,
     /// Added to every timestamp after a catch-up, so the timeline stays continuous.
@@ -72,6 +74,7 @@ impl Output {
             metadata: None,
             video_header: None,
             audio_header: None,
+            extra_headers: Vec::new(),
             limit_ms: limit.as_millis() as u32,
             shift: 0,
             last_ts: None,
@@ -84,7 +87,13 @@ impl Output {
         // decoder configs are sent in order and also kept for the next reconnect
         match p.kind {
             Kind::Video if flv::video_is_sequence_header(&p.data) => self.video_header = Some(p.clone()),
-            Kind::Audio if flv::audio_is_sequence_header(&p.data) => self.audio_header = Some(p.clone()),
+            Kind::Audio if flv::audio_is_sequence_header(&p.data) => match flv::audio_track(&p.data) {
+                0 => self.audio_header = Some(p.clone()),
+                t => match self.extra_headers.iter_mut().find(|(k, _)| *k == t) {
+                    Some(h) => h.1 = p.clone(),
+                    None => self.extra_headers.push((t, p.clone())),
+                },
+            },
             _ => {}
         }
         self.pending.push_back(p);
@@ -389,7 +398,8 @@ async fn pump(
                 }
                 out.need_key = false;
                 let ts = out.out_ts(p.ts);
-                for h in [out.video_header.clone(), out.audio_header.clone()].into_iter().flatten() {
+                let extra = out.extra_headers.iter().map(|(_, h)| h.clone());
+                for h in [out.video_header.clone(), out.audio_header.clone()].into_iter().flatten().chain(extra) {
                     send_packet(&mut session, &mut writer, &h, ts).await?;
                 }
                 sent_bytes += p.data.len();
@@ -625,6 +635,83 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// Records the first bytes of every media message a platform receives.
+    async fn recording_server(mut sock: tokio::io::DuplexStream) -> Vec<(Kind, Vec<u8>)> {
+        use rml_rtmp::sessions::{ServerSession, ServerSessionConfig, ServerSessionEvent, ServerSessionResult};
+        let leftover = rtmp_io::handshake(&mut sock, PeerType::Server).await.unwrap();
+        let (mut session, initial) = ServerSession::new(ServerSessionConfig::new()).unwrap();
+        let mut results: VecDeque<ServerSessionResult> = initial.into();
+        results.extend(session.handle_input(&leftover).unwrap());
+        let (mut buf, mut got) = (vec![0u8; 16 * 1024], Vec::new());
+        loop {
+            while let Some(r) = results.pop_front() {
+                match r {
+                    ServerSessionResult::OutboundResponse(p) => sock.write_all(&p.bytes).await.unwrap(),
+                    ServerSessionResult::RaisedEvent(
+                        ServerSessionEvent::ConnectionRequested { request_id, .. } | ServerSessionEvent::PublishStreamRequested { request_id, .. },
+                    ) => results.extend(session.accept_request(request_id).unwrap()),
+                    ServerSessionResult::RaisedEvent(ServerSessionEvent::VideoDataReceived { data, .. }) => got.push((Kind::Video, data.to_vec())),
+                    ServerSessionResult::RaisedEvent(ServerSessionEvent::AudioDataReceived { data, .. }) => got.push((Kind::Audio, data.to_vec())),
+                    _ => {}
+                }
+            }
+            match sock.read(&mut buf).await {
+                Ok(0) | Err(_) => return got,
+                Ok(n) => results.extend(session.handle_input(&buf[..n]).unwrap()),
+            }
+        }
+    }
+
+    /// A destination that starts at a keyframe gets the VOD track's header with the others,
+    /// and the VOD audio from before that keyframe is left out like the main audio.
+    #[tokio::test]
+    async fn vod_track_reaches_the_platform() {
+        let (client, server) = tokio::io::duplex(256 * 1024);
+        let server = tokio::spawn(recording_server(server));
+        let conn = negotiate(Box::new(client), "app".into(), "rtmp://test/app".into(), "key").await.unwrap();
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let cfg = crate::config::Config::default();
+        let shared = Shared {
+            status: Mutex::new(crate::status::Status::new(&cfg)),
+            config: Mutex::new(cfg),
+            config_path: Default::default(),
+            bridge: Default::default(),
+            update_now: Default::default(),
+            events: tokio::sync::broadcast::channel(16).0,
+        };
+        let mt_start = vec![0x95, 0x00, b'm', b'p', b'4', b'a', 1, 0x11, 0x90];
+        let mt = |n: u8| vec![0x95, 0x01, b'm', b'p', b'4', b'a', 1, 0x21, n];
+        let send = |kind, ts, d: Vec<u8>| tx.send(UpMsg::Packet(OutPacket { kind, ts, data: Bytes::from(d) })).unwrap();
+        send(Kind::Video, 0, vec![0x17, 0, 0, 0, 0]);
+        send(Kind::Audio, 0, vec![0xAF, 0, 0x11, 0x90]);
+        send(Kind::Audio, 0, mt_start.clone());
+        send(Kind::Audio, 5, mt(1)); // before the keyframe: dropped
+        send(Kind::Video, 10, vec![0x17, 1, 0, 0, 0]);
+        send(Kind::Audio, 21, vec![0xAF, 1, 0x21]);
+        send(Kind::Audio, 20, mt(2)); // 1 ms behind the main audio
+        send(Kind::Video, 43, vec![0x27, 1, 0, 0, 0]);
+        // the stream goes on for a moment (a Stop right away flushes whatever is left)
+        let stop = tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            tx.send(UpMsg::Stop).unwrap();
+        });
+        let mut out = Output::new(Duration::from_secs(5));
+        pump(conn, &mut rx, &mut out, &shared, 0, "test").await.unwrap();
+        stop.await.unwrap();
+        let got = server.await.unwrap();
+        let heads: Vec<(Kind, Vec<u8>)> = got.iter().map(|(k, d)| (*k, d.clone())).collect();
+        let want = vec![
+            (Kind::Video, vec![0x17, 0, 0, 0, 0]),
+            (Kind::Audio, vec![0xAF, 0, 0x11, 0x90]),
+            (Kind::Audio, mt_start),
+            (Kind::Video, vec![0x17, 1, 0, 0, 0]),
+            (Kind::Audio, vec![0xAF, 1, 0x21]),
+            (Kind::Audio, mt(2)),
+            (Kind::Video, vec![0x27, 1, 0, 0, 0]),
+        ];
+        assert_eq!(heads, want);
     }
 
     /// The network is slower than the stream: the backlog must be dropped (skip

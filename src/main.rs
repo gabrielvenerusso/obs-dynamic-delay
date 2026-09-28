@@ -323,6 +323,9 @@ fn primer(engine: &Engine, metadata: &Option<StreamMetadata>, ts: u32) -> Vec<Up
     if let Some(h) = engine.audio_header() {
         v.push(UpMsg::Packet(OutPacket { kind: Kind::Audio, ts, data: h.clone() }));
     }
+    for h in engine.extra_audio_headers() {
+        v.push(UpMsg::Packet(OutPacket { kind: Kind::Audio, ts, data: h.clone() }));
+    }
     v
 }
 

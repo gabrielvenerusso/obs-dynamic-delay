@@ -143,6 +143,9 @@ pub struct Engine {
     offset: i64,
     rebase_next: bool,
     last_out: [Option<u64>; 2],
+    /// Last timestamp of each extra audio track (Twitch VOD track), which interleaves
+    /// with the main audio and has its own monotonic timeline.
+    last_extra: Vec<(u8, u64)>,
     last_any: u64,
     max_video_pts: Option<u64>,
     header_seen: [bool; 2],
@@ -169,6 +172,8 @@ pub struct Engine {
     last_key_sent: Option<Bytes>,
     video_header: Option<Bytes>,
     audio_header: Option<Bytes>,
+    /// Decoder configs of the extra audio tracks (Enhanced RTMP multitrack), by track id.
+    extra_audio_headers: Vec<(u8, Bytes)>,
     /// OBS stopped publishing: a pending fill must not wait for more input.
     input_ended: bool,
 }
@@ -187,6 +192,7 @@ impl Engine {
             offset: 0,
             rebase_next: false,
             last_out: [None, None],
+            last_extra: Vec::new(),
             last_any: 0,
             max_video_pts: None,
             header_seen: [false, false],
@@ -207,6 +213,7 @@ impl Engine {
             last_key_sent: None,
             video_header: None,
             audio_header: None,
+            extra_audio_headers: Vec::new(),
             input_ended: false,
         }
     }
@@ -291,7 +298,12 @@ impl Engine {
         Some(Clip {
             video_header: self.video_header.clone(),
             audio_header: self.audio_header.clone(),
-            packets: all[start..].iter().map(|q| (q.kind, q.ts, q.data.clone())).collect(),
+            // clips hold the stream's own audio: the extra (VOD) track stays out of the MP4
+            packets: all[start..]
+                .iter()
+                .filter(|q| q.kind != Kind::Audio || flv::audio_track(&q.data) == 0)
+                .map(|q| (q.kind, q.ts, q.data.clone()))
+                .collect(),
         })
     }
 
@@ -303,6 +315,12 @@ impl Engine {
     /// The audio codec header (AAC AudioSpecificConfig).
     pub fn audio_header(&self) -> Option<&Bytes> {
         self.audio_header.as_ref()
+    }
+
+    /// Codec headers of the extra audio tracks (the Twitch VOD track), for a destination
+    /// that starts mid-stream.
+    pub fn extra_audio_headers(&self) -> impl Iterator<Item = &Bytes> {
+        self.extra_audio_headers.iter().map(|(_, h)| h)
     }
 
     pub fn take_scene_events(&mut self) -> Vec<SceneEvent> {
@@ -346,13 +364,22 @@ impl Engine {
             }
             Kind::Audio => (flv::audio_is_sequence_header(&data), false),
         };
-        if header && kind == Kind::Audio {
+        let track = if kind == Kind::Audio { flv::audio_track(&data) } else { 0 };
+        if header && kind == Kind::Audio && track == 0 {
             self.aac = flv::parse_aac_config(&data);
         }
+        let mut first_extra = false;
         if header {
             match kind {
                 Kind::Video => self.video_header = Some(data.clone()),
-                Kind::Audio => self.audio_header = Some(data.clone()),
+                Kind::Audio if track == 0 => self.audio_header = Some(data.clone()),
+                Kind::Audio => match self.extra_audio_headers.iter_mut().find(|(t, _)| *t == track) {
+                    Some(h) => h.1 = data.clone(),
+                    None => {
+                        self.extra_audio_headers.push((track, data.clone()));
+                        first_extra = true;
+                    }
+                },
             }
         }
         let mut cut_before = false;
@@ -366,8 +393,11 @@ impl Engine {
         }
         // The very first decoder config of each track is sent right away so the
         // upstream can always decode filler frames, even at stream start.
-        if header && !self.header_seen[kind.idx()] {
-            self.header_seen[kind.idx()] = true;
+        let first = if track > 0 { first_extra } else { header && !self.header_seen[kind.idx()] };
+        if header && first {
+            if track == 0 {
+                self.header_seen[kind.idx()] = true;
+            }
             self.bypass.push(OutPacket { kind, ts: self.last_any as u32, data });
             return;
         }
@@ -488,7 +518,9 @@ impl Engine {
         if !q.header && !self.history_window.is_zero() {
             self.history.push_back(q.clone());
         }
-        if let Some(ts) = self.stamp(q.kind, ts, q.header, cts) {
+        let track = if q.kind == Kind::Audio { flv::audio_track(&q.data) } else { 0 };
+        let stamped = if track > 0 { self.stamp_extra(track, ts, q.header) } else { self.stamp(q.kind, ts, q.header, cts) };
+        if let Some(ts) = stamped {
             out.push(OutPacket { kind: q.kind, ts: ts as u32, data: q.data });
         }
     }
@@ -509,6 +541,24 @@ impl Engine {
             let pts = (ts as i64 + cts).max(0) as u64;
             self.max_video_pts = Some(self.max_video_pts.map_or(pts, |m| m.max(pts)));
         }
+        Some(ts)
+    }
+
+    /// Like `stamp`, on the timeline of an extra audio track.
+    fn stamp_extra(&mut self, track: u8, mut ts: u64, header: bool) -> Option<u64> {
+        match self.last_extra.iter_mut().find(|(t, _)| *t == track) {
+            Some((_, last)) => {
+                if ts < *last {
+                    if !header {
+                        return None;
+                    }
+                    ts = *last;
+                }
+                *last = ts;
+            }
+            None => self.last_extra.push((track, ts)),
+        }
+        self.last_any = self.last_any.max(ts);
         Some(ts)
     }
 
@@ -638,6 +688,13 @@ impl Engine {
         }
         if let Some(aac) = self.aac {
             let silent = flv::silent_aac_frame(&aac);
+            // the extra tracks (Twitch VOD track) stay in step with silence of their own
+            let extra: Vec<(u8, Bytes)> = self
+                .extra_audio_headers
+                .iter()
+                .filter_map(|(_, h)| flv::parse_multitrack_aac(h))
+                .map(|(t, info)| (t, flv::silent_multitrack_frame(t, &info)))
+                .collect();
             loop {
                 let rel = f.audio_n * 1024 * 1000 / aac.sample_rate as u64;
                 if rel > elapsed {
@@ -646,6 +703,11 @@ impl Engine {
                 f.audio_n += 1;
                 if let Some(ts) = self.stamp(Kind::Audio, f.base + rel, false, 0) {
                     out.push(OutPacket { kind: Kind::Audio, ts: ts as u32, data: silent.clone() });
+                }
+                for (track, frame) in &extra {
+                    if let Some(ts) = self.stamp_extra(*track, f.base + rel, false) {
+                        out.push(OutPacket { kind: Kind::Audio, ts: ts as u32, data: frame.clone() });
+                    }
                 }
             }
         }
@@ -812,6 +874,83 @@ mod tests {
                 last[p.kind.idx()] = p.ts;
             }
         }
+    }
+
+    const MT_START: [u8; 9] = [0x95, 0x00, b'm', b'p', b'4', b'a', 1, 0x11, 0x90];
+
+    fn mt_frame(n: u64) -> Bytes {
+        let mut d = vec![0x95, 0x01, b'm', b'p', b'4', b'a', 1, 0x21];
+        d.extend_from_slice(&(n as u32).to_be_bytes());
+        d.into()
+    }
+
+    /// OBS with the Twitch VOD track: a second AAC track (Enhanced RTMP multitrack) that
+    /// interleaves with the main one, sometimes a millisecond behind it.
+    fn vod_run(engine: &mut Engine, t0: Instant, from_ms: u64, to_ms: u64, out: &mut Vec<OutPacket>, pushed: &mut u64) {
+        for ms in from_ms..to_ms {
+            let now = t0 + Duration::from_millis(ms);
+            if ms.is_multiple_of(33) {
+                let f = ms / 33;
+                let key = f.is_multiple_of(60);
+                let mut data = if key { vec![0x17, 1, 0, 0, 0] } else { vec![0x27, 1, 0, 0, 0] };
+                data.extend_from_slice(&(f as u32).to_be_bytes());
+                engine.push(Kind::Video, ms, data.into(), now);
+            }
+            if ms.is_multiple_of(21) {
+                engine.push(Kind::Audio, ms, Bytes::from_static(&[0xAF, 1, 0x21]), now);
+                // the VOD track comes right after, stamped 1 ms earlier half of the time
+                let ts = if (ms / 21).is_multiple_of(2) { ms.saturating_sub(1) } else { ms };
+                engine.push(Kind::Audio, ts, mt_frame(*pushed), now);
+                *pushed += 1;
+            }
+            engine.poll(now, out);
+        }
+    }
+
+    #[test]
+    fn vod_track_goes_through_with_the_delay() {
+        let mut engine = Engine::new(2);
+        let t0 = Instant::now();
+        // OBS sends every codec header before the first keyframe
+        engine.push(Kind::Video, 0, Bytes::from_static(&AVC_HDR), t0);
+        engine.push(Kind::Audio, 0, Bytes::from_static(&AAC_HDR), t0);
+        engine.push(Kind::Audio, 0, Bytes::from_static(&MT_START), t0);
+        let (mut out, mut pushed) = (Vec::new(), 0);
+        vod_run(&mut engine, t0, 0, 3000, &mut out, &mut pushed);
+
+        // live: every VOD frame goes out, none dropped for being 1 ms behind the main audio
+        let frames = |o: &[OutPacket]| o.iter().filter(|p| flv::audio_track(&p.data) == 1 && !flv::audio_is_sequence_header(&p.data)).count();
+        assert_eq!(frames(&out) as u64, pushed, "VOD frames lost while live");
+        // its header went out once, before any of its frames, and the main audio config is intact
+        let first_hdr = out.iter().position(|p| p.data[..] == MT_START).expect("VOD track header not sent");
+        let first_frame = out.iter().position(|p| flv::audio_track(&p.data) == 1 && !flv::audio_is_sequence_header(&p.data)).unwrap();
+        assert!(first_hdr < first_frame);
+        assert_eq!(engine.audio_header().map(|h| &h[..]), Some(&AAC_HDR[..]));
+        assert!(engine.aac.is_some(), "main AAC config lost: no silent audio during a freeze");
+        assert_eq!(engine.extra_audio_headers().count(), 1);
+
+        // delay on (rewind), then off: each track keeps its own monotonic timeline
+        engine.set_grow_mode(GrowMode::Rewind, Duration::from_secs(20));
+        engine.set_target(Duration::from_secs(5));
+        vod_run(&mut engine, t0, 3000, 15_000, &mut out, &mut pushed);
+        assert_eq!(engine.status(t0 + Duration::from_millis(15_000)).phase, Phase::Delayed);
+        let delayed = out.len();
+        vod_run(&mut engine, t0, 15_000, 20_000, &mut out, &mut pushed);
+        let vod_after = frames(&out[delayed..]);
+        assert!(vod_after > 200, "VOD track stopped while delayed: {vod_after} frames in 5 s");
+        engine.set_target(Duration::ZERO);
+        vod_run(&mut engine, t0, 20_000, 26_000, &mut out, &mut pushed);
+        let mut last = std::collections::HashMap::new();
+        for p in &out {
+            let track = (p.kind.idx(), if p.kind == Kind::Audio { flv::audio_track(&p.data) } else { 0 });
+            let prev = last.insert(track, p.ts).unwrap_or(0);
+            assert!(p.ts >= prev, "track {track:?} went back: {} < {prev}", p.ts);
+        }
+
+        // clips keep only the stream's own audio
+        let clip = engine.snapshot(t0 + Duration::from_millis(26_000), Duration::from_secs(10), false).expect("clip");
+        assert!(clip.packets.iter().all(|(k, _, d)| *k != Kind::Audio || flv::audio_track(d) == 0));
+        assert!(clip.packets.iter().any(|(k, _, _)| *k == Kind::Audio));
     }
 
     #[test]
