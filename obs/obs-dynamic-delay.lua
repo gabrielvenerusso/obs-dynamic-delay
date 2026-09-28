@@ -359,6 +359,14 @@ local function apply_platform_limits(service_name)
         table.insert(changes, L("keyframe every 2 s", "keyframe a cada 2 s", "keyframe cada 2 s"))
       end
       if #changes > 0 then
+        -- the original, once, so uninstalling puts it back ("{}" = the file did not exist)
+        if not exists(path .. ".dd-backup") then
+          local src = io.open(path, "rb")
+          local body = src and src:read("*a") or "{}"
+          if src then src:close() end
+          local dst = io.open(path .. ".dd-backup", "wb")
+          if dst then dst:write(body ~= "" and body or "{}"); dst:close() end
+        end
         obs.obs_data_save_json_safe(file, path, "tmp", "bak")
         -- the encoder OBS already created, for this very stream
         local out = obs.obs_frontend_get_streaming_output()

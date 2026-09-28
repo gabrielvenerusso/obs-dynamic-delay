@@ -281,6 +281,7 @@ El plugin se probó con un Stream Deck simulado, todavía no en hardware real: p
 
 | Síntoma | Qué hacer |
 |---|---|
+| `[obs-dynamic-delay.lua] Error opening file: (null)` | El programa se borró con otra herramienta. Ver [Desinstalar de la forma correcta](#desinstalar-de-la-forma-correcta). |
 | El panel muestra **RELAY CERRADO** | Es normal mientras OBS está iniciando. Si sigue así, abre **Herramientas > Scripts**, verifica que `obs-dynamic-delay.lua` esté en la lista y haz clic en "Reiniciar relay". |
 | El panel dice que falta el token de acceso | Ábrelo desde OBS (menú Docks) o con el botón "Abrir panel" del script, no escribiendo la dirección. |
 | **Plataforma RECONECTANDO** con un error | Casi siempre es una clave o URL incorrecta. Revisa **Configuración**. |
@@ -298,7 +299,28 @@ Al abrir un issue, adjunta `obs-dynamic-delay.log`. Las claves de transmisión n
 
 ## Actualizar y desinstalar
 
-El relay busca una versión nueva en GitHub al iniciar, cada 6 horas y cuando haces clic en **Buscar ahora** (Configuración > General > Actualizaciones, que también muestra "al día" y la hora de la última verificación). Una versión nueva muestra un banner en el panel, un aviso y una línea en el estado del script en OBS (Herramientas > Scripts). Con el **Aviso de actualización** desactivado en Funciones y panel, no se hace ninguna conexión. Para actualizar, ejecuta el nuevo `Dynamic-Delay-Setup.exe`: se instala sobre la versión anterior y conserva tu configuración y tus claves. Para desinstalar, usa **Configuración > Aplicaciones > Dynamic Delay for OBS** de Windows: quita el script y el panel, restaura la configuración de transmisión original y pregunta si también quieres borrar tu configuración. El instalador también acepta las opciones habituales de Inno Setup (`/SILENT`, `/VERYSILENT`, `/LANG=en|pt|es`).
+El relay busca una versión nueva en GitHub al iniciar, cada 6 horas y cuando haces clic en **Buscar ahora** (Configuración > General > Actualizaciones, que también muestra "al día" y la hora de la última verificación). Una versión nueva muestra un banner en el panel, un aviso y una línea en el estado del script en OBS (Herramientas > Scripts). Con el **Aviso de actualización** desactivado en Funciones y panel, no se hace ninguna conexión. Para actualizar, ejecuta el nuevo `Dynamic-Delay-Setup.exe`: se instala sobre la versión anterior y conserva tu configuración y tus claves. Para desinstalar, mira [Desinstalar de la forma correcta](#desinstalar-de-la-forma-correcta) más abajo. El instalador también acepta las opciones habituales de Inno Setup (`/SILENT`, `/VERYSILENT`, `/LANG=en|pt|es`).
+
+### Desinstalar de la forma correcta
+
+> [!WARNING]
+> Desinstala solo desde **Configuración > Aplicaciones > Dynamic Delay for OBS** de Windows (o menú Inicio > Dynamic Delay for OBS > Desinstalar). **No uses Geek Uninstaller, Revo, IObit ni similares**, y no borres la carpeta a mano: borran los archivos sin ejecutar el paso que devuelve la configuración de OBS, y OBS sigue transmitiendo al relay que ya no existe.
+
+1. Cierra OBS.
+2. **Configuración > Aplicaciones > Aplicaciones instaladas > Dynamic Delay for OBS > Desinstalar** de Windows.
+3. Abre OBS. Todo vuelve a como estaba antes de instalar:
+   - tu servicio de transmisión (Twitch, Kick, YouTube...) con la cuenta conectada;
+   - el retraso de transmisión propio de OBS;
+   - el bitrate y el intervalo de keyframe, si el script los había ajustado a la plataforma;
+   - el script y el panel salen de todos los perfiles y colecciones de escenas.
+   Un valor que cambiaste tú después de instalar se mantiene.
+
+**¿Ya lo borraste con otro programa?** Arregla OBS a mano:
+1. **Herramientas > Scripts:** selecciona `obs-dynamic-delay.lua` (muestra el error `Error opening file: (null)`) y pulsa **−** para quitarlo.
+2. **Configuración > Emisión:** elige tu plataforma otra vez en lugar de "Personalizado" y pulsa **Conectar cuenta** (o pega tu clave).
+3. **Paneles > Paneles de navegador personalizados:** quita "Delay dinámico".
+4. **Configuración > Salida:** revisa el bitrate y, en Twitch, la **pista de audio del VOD** si la usas.
+O instala Dynamic Delay otra vez y desinstálalo de la forma correcta.
 
 ## Seguridad
 
@@ -393,6 +415,7 @@ El workflow (`.github/workflows/release.yml`) ejecuta las pruebas, compila `dist
 
 ## Limitaciones conocidas
 
+- **Pista de audio del VOD de Twitch y cuenta conectada:** con Dynamic Delay instalado, OBS transmite a un servidor personalizado (el relay), así que OBS oculta las opciones que solo existen con el servicio Twitch: la **pista de audio del VOD** (una pista de audio aparte para el VOD, muy usada para dejar la música fuera), la cuenta conectada y sus paneles. Si dependes de esa pista para que la música con derechos no quede en el VOD, silénciala de otra forma mientras usas Dynamic Delay. Desinstalar de la forma correcta devuelve esas opciones.
 - Probado de extremo a extremo en local (ffmpeg como OBS y como las plataformas, un OBS y un Stream Deck simulados). Haz una transmisión de prueba en tu plataforma antes de una importante: [docs/TESTING.md](docs/TESTING.md).
 - Solo RTMP/RTMPS. WHIP, SRT y la "Transmisión mejorada" (multipista) de Twitch no pasan por el relay.
 - El delay cambia en los keyframes (unos 2 s con el intervalo predeterminado de OBS).

@@ -279,6 +279,7 @@ Still stuck? Ask in the [Discord server](https://discord.gg/crctbnQ2f8) (#suport
 
 | Symptom | What to do |
 |---|---|
+| `[obs-dynamic-delay.lua] Error opening file: (null)` | The program was removed with another tool. See [Uninstall the right way](#uninstall-the-right-way). |
 | The panel shows **RELAY CLOSED** | Normal while OBS is starting. If it stays, open **Tools > Scripts**, check that `obs-dynamic-delay.lua` is listed and click "Restart relay". |
 | The panel says the access token is missing | Open it from OBS (Docks menu) or the script's "Open panel" button, not by typing the address. |
 | **Platform reconnecting** with an error | Almost always a wrong key or URL. Check **Settings**. |
@@ -296,7 +297,28 @@ When opening an issue, attach `obs-dynamic-delay.log`. The stream keys are not w
 
 ## Updating and uninstalling
 
-The relay checks GitHub for a new version when it starts, every 6 hours and when you click **Check now** (Settings > General > Updates, which also shows "up to date" and the time of the last check). A new version shows a banner in the panel, a notice, and a line in the script's status in OBS (Tools > Scripts). With **Update notice** off under Features and panel, no connection is made. To update, run the new `Dynamic-Delay-Setup.exe`: it installs over the old version and keeps your settings and keys. To uninstall, use Windows **Settings > Apps > Dynamic Delay for OBS**: it removes the script and the panel, restores the original stream settings and asks whether to delete your settings too. The Setup also accepts the usual Inno Setup options (`/SILENT`, `/VERYSILENT`, `/LANG=en|pt|es`).
+The relay checks GitHub for a new version when it starts, every 6 hours and when you click **Check now** (Settings > General > Updates, which also shows "up to date" and the time of the last check). A new version shows a banner in the panel, a notice, and a line in the script's status in OBS (Tools > Scripts). With **Update notice** off under Features and panel, no connection is made. To update, run the new `Dynamic-Delay-Setup.exe`: it installs over the old version and keeps your settings and keys. To uninstall, see [Uninstall the right way](#uninstall-the-right-way) below. The Setup also accepts the usual Inno Setup options (`/SILENT`, `/VERYSILENT`, `/LANG=en|pt|es`).
+
+### Uninstall the right way
+
+> [!WARNING]
+> Uninstall only from **Windows Settings > Apps > Dynamic Delay for OBS** (or Start menu > Dynamic Delay for OBS > Uninstall). **Do not use Geek Uninstaller, Revo, IObit or similar tools**, and do not just delete the folder: they delete the files without running the step that gives OBS its settings back, so OBS keeps streaming to the relay that no longer exists.
+
+1. Close OBS.
+2. Windows **Settings > Apps > Installed apps > Dynamic Delay for OBS > Uninstall**.
+3. Open OBS. Everything is back as it was before the install:
+   - your stream service (Twitch, Kick, YouTube...) with the connected account;
+   - OBS' own Stream Delay;
+   - the bitrate and keyframe interval, if the script had capped them for the platform;
+   - the script and the panel are gone, in every profile and scene collection.
+   A value you changed yourself after installing is kept.
+
+**Already removed it with another program?** Fix OBS by hand:
+1. **Tools > Scripts:** select `obs-dynamic-delay.lua` (it shows the error `Error opening file: (null)`) and click **−** to remove it.
+2. **Settings > Stream:** pick your platform again instead of "Custom" and click **Connect account** (or paste your stream key).
+3. **Docks > Custom browser docks:** remove "Dynamic Delay".
+4. **Settings > Output:** check the bitrate, and on Twitch the **Twitch VOD track** if you use one.
+Or install Dynamic Delay again and then uninstall it the right way.
 
 ## Security
 
@@ -391,6 +413,7 @@ The workflow (`.github/workflows/release.yml`) runs the tests, builds `dist/Dyna
 
 ## Known limitations
 
+- **Twitch VOD track and connected account:** while Dynamic Delay is installed, OBS streams to a custom server (the relay), so OBS hides the options that only exist with the Twitch service: the **Twitch VOD track** (a separate audio track for the VOD, often used to keep music out of it), the connected account and its docks. If you rely on the VOD track to keep copyrighted music out of your VODs, mute that music some other way while you use Dynamic Delay. Uninstalling the right way brings these options back.
 - Tested end to end locally (ffmpeg as OBS and as the platforms, a simulated OBS and Stream Deck). Do a test stream on your platform before an important one: [docs/TESTING.md](docs/TESTING.md).
 - RTMP/RTMPS only. WHIP, SRT and Twitch's "Enhanced Broadcasting" (multitrack) do not go through the relay.
 - The delay changes at keyframes (about 2 s with OBS' default interval).

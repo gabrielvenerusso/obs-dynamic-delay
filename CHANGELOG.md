@@ -2,6 +2,17 @@
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [SemVer](https://semver.org/).
 
+## [0.12.1] - 2026-09-28
+
+### Fixed
+
+- **Uninstalling puts OBS back exactly as it was.** Before, it only restored the stream service of the profile in use at uninstall time. Now every profile that streams to the relay gets its own original settings back, and so do OBS' own Stream Delay and the bitrate and keyframe interval the OBS script capped for the platform (a value changed by hand later is kept). The original stream settings are also kept inside the OBS profile, so they survive the app folder being deleted, and no backup files are left behind.
+
+### Documentation
+
+- **Uninstall the right way:** only from Windows Settings > Apps, never with Geek Uninstaller, Revo or similar tools (they delete the files without giving OBS its settings back). Steps to fix OBS by hand after such a removal, and the `Error opening file: (null)` script error, in the READMEs and on the Discord server.
+- Known limitation: while Dynamic Delay is installed, OBS streams to a custom server and hides the **Twitch VOD track** and the connected account options.
+
 ## [0.12.0] - 2026-09-27
 
 ### Added
