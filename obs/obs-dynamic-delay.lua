@@ -558,6 +558,7 @@ local function restore_obs()
   local path = profile_path()
   if not path then return end
   local backup_path = path .. "/service.json.dd-backup"
+  if not exists(backup_path) then backup_path = dir() .. "obs-service-backup.json" end
   if not exists(backup_path) then
     report_error(L("No original settings were saved.", "Não há configuração original salva.", "No hay configuración original guardada."))
     return
