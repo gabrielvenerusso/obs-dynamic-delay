@@ -58,7 +58,7 @@ pub fn quiet(mode: Mode) -> i32 {
             bail!("{}", t!("Close OBS and try again.", "Feche o OBS e tente de novo.", "Cierra OBS e inténtalo de nuevo."));
         }
         match mode {
-            Mode::Uninstall => uninstall(&p)?,
+            Mode::Uninstall => uninstall_with_force(&p, std::env::args().any(|a| a == "--force"))?,
             _ => {
                 install(&p, false)?;
             }
@@ -138,7 +138,7 @@ fn run(mode: Mode) -> Result<()> {
     };
     wait_obs_closed();
     match mode {
-        Mode::Uninstall => uninstall(&p),
+        Mode::Uninstall => uninstall_with_force(&p, std::env::args().any(|a| a == "--force")),
         _ => {
             install(&p, true)?;
             if ask(&t!("Open OBS now? [Y/n] ", "Abrir o OBS agora? [S/n] ", "¿Abrir OBS ahora? [S/n] ")).to_lowercase().starts_with('n') {
@@ -384,6 +384,20 @@ fn install(p: &Paths, interactive: bool) -> Result<Config> {
 }
 
 fn uninstall(p: &Paths) -> Result<()> {
+    uninstall_inner(p, false)
+}
+
+fn uninstall_with_force(p: &Paths, force: bool) -> Result<()> {
+    if !force { return uninstall(p); }
+    // Never delete recovery evidence in forced mode, even after a successful retry.
+    if let Err(e) = uninstall_inner(p, true) {
+        step(&format!("WARNING: incomplete OBS recovery: {e:#}"));
+    }
+    step("Forced removal allowed; recovery files kept in OBS profiles and the application folder. Manual OBS recovery may be required.");
+    Ok(())
+}
+
+fn uninstall_inner(p: &Paths, keep_recovery: bool) -> Result<()> {
     // Keep all recovery files until every restoration succeeds. A retry is idempotent.
     let mut cleanup = Vec::new();
     for c in p.scene_collections()? {
@@ -436,7 +450,18 @@ fn uninstall(p: &Paths) -> Result<()> {
     for prof in p.profiles()? {
         let svc = prof.join("service.json");
         let kept = backup_of(&svc);
-        let to_relay = svc.exists() && read_json(&svc)?["settings"]["server"].as_str().is_some_and(|s| s.contains(&listen));
+        let to_relay = match read_json(&svc) {
+            Ok(v) => v["settings"]["server"].as_str().is_some_and(|s| s.contains(&listen)),
+            Err(e) => {
+                // A damaged unrelated profile must not prevent uninstall. Retain all
+                // its evidence; a readable relay address in malformed JSON is unsafe.
+                let relay_evidence = std::fs::read_to_string(&svc).ok()
+                    .is_some_and(|text| text.contains(&listen));
+                if relay_evidence { return Err(e).context("damaged relay profile; recovery files kept"); }
+                step(&format!("WARNING: skipping unreadable profile {}: {e:#}", prof.display()));
+                continue;
+            }
+        };
         if to_relay {
             let current = p.profile_dir().ok().is_some_and(|c| c == prof);
             if kept.exists() {
@@ -469,7 +494,7 @@ fn uninstall(p: &Paths) -> Result<()> {
     for f in p.scene_collections()?.into_iter().chain([p.user_ini()]) {
         cleanup.push(backup_of(&f));
     }
-    for f in cleanup {
+    for f in cleanup.into_iter().filter(|_| !keep_recovery) {
         match std::fs::remove_file(&f) {
             Ok(()) => {},
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {},
@@ -1056,6 +1081,57 @@ mod tests {
             assert_eq!(read_json(&prof.join("service.json")).unwrap()["settings"]["key"], name);
             assert_eq!(ini_get(&std::fs::read_to_string(prof.join("basic.ini")).unwrap(), "Output", "DelayEnable").as_deref(), Some("true"));
         }
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn unreadable_unrelated_profile_does_not_block_uninstall() {
+        let root = std::env::temp_dir().join(format!("dd-unrelated-{}", uuid()));
+        let p = Paths { obs_dir: root.join("obs"), install_dir: root.join("relay") };
+        let prof = p.obs_dir.join("basic/profiles/Unrelated");
+        std::fs::create_dir_all(&prof).unwrap();
+        std::fs::write(prof.join("service.json"), "broken JSON").unwrap();
+        std::fs::write(prof.join("service.json.dd-backup"), "keep me").unwrap();
+        uninstall(&p).unwrap();
+        assert_eq!(std::fs::read_to_string(prof.join("service.json.dd-backup")).unwrap(), "keep me");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn force_preserves_recovery_after_missing_config_and_corrupt_relay() {
+        let root = std::env::temp_dir().join(format!("dd-force-{}", uuid()));
+        let p = Paths { obs_dir: root.join("obs"), install_dir: root.join("relay") };
+        let prof = p.obs_dir.join("basic/profiles/Main");
+        std::fs::create_dir_all(&prof).unwrap();
+        let listen = Config::default().listen;
+        write_json(&prof.join("service.json"), &service_for(&format!("rtmp://{listen}/live"), "test")).unwrap();
+        assert!(uninstall(&p).is_err());
+        uninstall_with_force(&p, true).unwrap();
+        std::fs::write(prof.join("service.json.dd-backup"), "corrupt backup").unwrap();
+        assert!(uninstall(&p).is_err());
+        uninstall_with_force(&p, true).unwrap();
+        assert_eq!(std::fs::read_to_string(prof.join("service.json.dd-backup")).unwrap(), "corrupt backup");
+        std::fs::write(prof.join("service.json"), format!("broken rtmp://{listen}/live")).unwrap();
+        assert!(uninstall(&p).is_err());
+        uninstall_with_force(&p, true).unwrap();
+        assert!(prof.join("service.json.dd-backup").exists());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn force_preserves_backups_even_when_restore_succeeds() {
+        let root = std::env::temp_dir().join(format!("dd-force-success-{}", uuid()));
+        let p = Paths { obs_dir: root.join("obs"), install_dir: root.join("relay") };
+        let prof = p.obs_dir.join("basic/profiles/Main");
+        std::fs::create_dir_all(&prof).unwrap();
+        std::fs::write(p.user_ini(), "[Basic]\nProfileDir=Main\n").unwrap();
+        write_json(&prof.join("service.json"), &service_for(TWITCH_URL, "original")).unwrap();
+        std::fs::write(prof.join("basic.ini"), "[Output]\nDelayEnable=true\n").unwrap();
+        install(&p, false).unwrap();
+        uninstall_with_force(&p, true).unwrap();
+        assert!(prof.join("service.json.dd-backup").exists());
+        assert!(prof.join("basic.ini.dd-changes.json").exists());
+        assert_eq!(read_json(&prof.join("service.json")).unwrap()["settings"]["key"], "original");
         std::fs::remove_dir_all(root).unwrap();
     }
 
