@@ -304,9 +304,11 @@ El relay busca una versión nueva en GitHub al iniciar, cada 6 horas y cuando ha
 ### Desinstalar de la forma correcta
 
 > [!WARNING]
-> Usa **Configuración > Aplicaciones > Dynamic Delay for OBS** de Windows (o menú Inicio > Dynamic Delay for OBS > Desinstalar). Borrar la carpeta o usar una limpieza forzada que omita el desinstalador puede dejar OBS apuntando a archivos ausentes y un relay que ya no existe.
+> **No uses Geek Uninstaller, Revo, IObit ni herramientas similares.** Usa **Configuración > Aplicaciones > Dynamic Delay for OBS** de Windows (o menú Inicio > Dynamic Delay for OBS > Desinstalar). Borrar la carpeta o usar una limpieza forzada que omita el desinstalador puede dejar OBS apuntando a archivos ausentes y un relay que ya no existe.
+>
+> Si la restauración falla, el desinstalador ofrece **Desinstalar de todos modos y conservar los archivos de recuperación**. OBS puede seguir apuntando al relay eliminado; restaura el servicio manualmente con las copias de los perfiles y la configuración conservada. La desinstalación silenciosa se cancela por defecto. En el auxiliar, `--uninstall --quiet --force` permite recuperación incompleta y conserva las copias; no elimina el programa ni omite la comprobación de OBS abierto.
 
-Si OBS está abierto o la restauración falla, la desinstalación se detiene antes de borrar el programa. Cierra OBS y vuelve a intentarlo; `setup.log` en la carpeta de instalación indica el error. Conserva los archivos de recuperación hasta completar el nuevo intento.
+Si OBS está abierto, la desinstalación se detiene antes de borrar el programa. Si la restauración falla, se detiene salvo que elijas explícitamente desinstalar de todos modos. Cierra OBS y vuelve a intentarlo; `setup.log` en la carpeta de instalación indica el error. Conserva los archivos de recuperación hasta completar el nuevo intento.
 
 1. Cierra OBS.
 2. **Configuración > Aplicaciones > Aplicaciones instaladas > Dynamic Delay for OBS > Desinstalar** de Windows.
