@@ -82,6 +82,14 @@ try {
     Assert-RecoveryKept
     Assert-True ([IO.File]::ReadAllText("$app\setup.log") -match 'ERROR:|ERRO:') "Restoration failure was not logged"
 
+    # Explicit helper force accepts incomplete recovery without consuming evidence.
+    $legacy = [IO.File]::ReadAllText("$app\obs-service-backup.json")
+    Assert-True ((Run-Exe "$app\obs-dynamic-delay.exe" @('--uninstall', '--quiet', '--force')) -eq 0) "Explicit force failed"
+    Assert-RecoveryKept
+    Assert-True ([IO.File]::ReadAllText("$profile\service.json.dd-backup") -eq 'broken JSON') "Force changed recovery evidence"
+    Assert-True ([IO.File]::ReadAllText("$app\obs-service-backup.json") -eq $legacy) "Force changed legacy backup"
+    Assert-True ((Uninstall) -ne 0) "Silent Inno uninstall must still require consent"
+
     # Fix the failed input and retry. Partial restoration must be safe to repeat.
     [IO.File]::WriteAllText("$profile\service.json.dd-backup", $service)
     Assert-True ((Uninstall) -eq 0) "Uninstall retry should succeed"

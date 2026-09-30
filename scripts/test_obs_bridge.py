@@ -144,6 +144,22 @@ class BridgeTest(unittest.TestCase):
         self.assertTrue((self.obs_dir / "basic/profiles/A/service.json.dd-backup").exists())
         self.assertTrue((self.path / "service.json.dd-backup").exists())
 
+    def test_restore_legacy_backup_and_prefer_profile_backup(self):
+        original = copy.deepcopy(self.profile["service"])
+        self.save_json(original, self.app / "obs-service-backup.json")
+        self.bridge.configure()
+        profile_backup = self.path / "service.json.dd-backup"
+        profile_backup.unlink()
+        self.bridge.restore()
+        self.assertEqual(self.profile["service"], original)
+        self.assertTrue((self.app / "obs-service-backup.json").exists())
+        self.bridge.configure()
+        other = copy.deepcopy(original)
+        other["settings"]["key"] = "wrong-legacy-profile"
+        self.save_json(other, self.app / "obs-service-backup.json")
+        self.bridge.restore()
+        self.assertEqual(self.profile["service"], original)
+
     def test_failed_service_restore_keeps_backup(self):
         self.bridge.configure()
         self.lua.globals().obslua.obs_service_create = lambda *_: None
