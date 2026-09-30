@@ -114,6 +114,9 @@ es.RestoreFailed=La desinstalación se detuvo porque no se pudo restaurar OBS (c
 en.Done=Done in OBS:
 pt.Done=Feito no OBS:
 es.Done=Hecho en OBS:
+en.ForceUninstall=OBS recovery failed. Uninstall anyway and keep the recovery files?%n%nOBS may still point to the removed relay. Keep the .dd-backup/.dd-changes.json files in your OBS profiles and the application folder for manual recovery. Choose No to fix the problem and retry.
+pt.ForceUninstall=A restauração do OBS falhou. Desinstalar mesmo assim e manter os arquivos de recuperação?%n%nO OBS pode continuar apontando para o relay removido. Guarde os arquivos .dd-backup/.dd-changes.json nos perfis do OBS e a pasta do aplicativo para recuperação manual. Escolha Não para corrigir o problema e tentar novamente.
+es.ForceUninstall=La restauración de OBS falló. ¿Desinstalar de todos modos y conservar los archivos de recuperación?%n%nOBS puede seguir apuntando al relay eliminado. Conserva los archivos .dd-backup/.dd-changes.json en los perfiles de OBS y la carpeta de la aplicación para recuperación manual. Elige No para corregir el problema y reintentar.
 en.DeleteSettings=Also delete your Dynamic Delay settings (stream keys, access token, clips folder choice)?%n%nChoose No to keep them for a future install.
 pt.DeleteSettings=Apagar também a configuração do Delay dinâmico (chaves de transmissão, token de acesso, pasta dos clipes)?%n%nEscolha Não para manter para uma próxima instalação.
 es.DeleteSettings=¿Borrar también tu configuración del Delay dinámico (claves de transmisión, token de acceso, carpeta de clips)?%n%nElige No para conservarla para una próxima instalación.
@@ -143,14 +146,14 @@ Filename: "{app}\obs-dynamic-delay.exe"; Parameters: "--launch-obs"; Description
 [UninstallDelete]
 Type: files; Name: "{app}\obs-dynamic-delay.lua"
 Type: files; Name: "{app}\dock.html"
-Type: files; Name: "{app}\setup.log"
 Type: files; Name: "{app}\obs-dynamic-delay.log"
 Type: files; Name: "{app}\obs-dynamic-delay-old.exe"
-Type: files; Name: "{app}\obs-service-backup.json"
 
 [Code]
 var
   SetupSteps: String;
+  KeepRecovery: Boolean;
+
 
 function ObsConfigDir: String;
 begin
@@ -264,6 +267,23 @@ begin
   end;
 end;
 
+// Older installed versions may have unconditional deletion records in their
+// appended uninstall log. Save legacy recovery evidence outside {app} first.
+procedure PreserveRecoveryFile(Name: String);
+var
+  Source, DestDir: String;
+begin
+  Source := ExpandConstant('{app}\') + Name;
+  if FileExists(Source) then
+  begin
+    DestDir := ObsConfigDir + '\dynamic-delay-recovery';
+    if not ForceDirectories(DestDir) then
+      RaiseException('Cannot preserve recovery files in ' + DestDir);
+    if not FileCopy(Source, DestDir + '\' + Name, False) then
+      RaiseException('Cannot preserve recovery file: ' + Source);
+  end;
+end;
+
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 var
   Code: Integer;
@@ -279,13 +299,31 @@ begin
     if not Exec(ExpandConstant('{app}\obs-dynamic-delay.exe'),
       '--uninstall --quiet --lang ' + ActiveLanguage, ExpandConstant('{app}'),
       SW_HIDE, ewWaitUntilTerminated, Code) then
-      RaiseException(FmtMessage(CustomMessage('RestoreFailed'),
-        [IntToStr(Code), ExpandConstant('{app}\setup.log')]));
+      Code := -1;
     if Code <> 0 then
-      RaiseException(FmtMessage(CustomMessage('RestoreFailed'),
-        [IntToStr(Code), ExpandConstant('{app}\setup.log')]));
+    begin
+      if SuppressibleMsgBox(CustomMessage('ForceUninstall'), mbConfirmation,
+        MB_YESNO or MB_DEFBUTTON2, IDNO) <> IDYES then
+        RaiseException(FmtMessage(CustomMessage('RestoreFailed'),
+          [IntToStr(Code), ExpandConstant('{app}\setup.log')]));
+      if ObsRunning then RaiseException(CustomMessage('ObsStillOpen'));
+      KeepRecovery := True;
+      // Missing/broken helper must not make removal impossible after consent.
+      // Inno also preserves legacy recovery data when the helper cannot run.
+      Exec(ExpandConstant('{app}\obs-dynamic-delay.exe'),
+        '--uninstall --quiet --force --lang ' + ActiveLanguage, ExpandConstant('{app}'),
+        SW_HIDE, ewWaitUntilTerminated, Code);
+      PreserveRecoveryFile('obs-service-backup.json');
+      PreserveRecoveryFile('config.toml');
+      PreserveRecoveryFile('setup.log');
+    end;
   end;
-  if (CurUninstallStep = usPostUninstall) and not UninstallSilent then
+  if (CurUninstallStep = usPostUninstall) and not KeepRecovery then
+  begin
+    DeleteFile(ExpandConstant('{app}\setup.log'));
+    DeleteFile(ExpandConstant('{app}\obs-service-backup.json'));
+  end;
+  if (CurUninstallStep = usPostUninstall) and not UninstallSilent and not KeepRecovery then
     if MsgBox(CustomMessage('DeleteSettings'), mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES then
       DelTree(ExpandConstant('{app}'), True, True, True);
 end;
