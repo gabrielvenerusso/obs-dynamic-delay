@@ -304,8 +304,8 @@ begin
     begin
       if SuppressibleMsgBox(CustomMessage('ForceUninstall'), mbConfirmation,
         MB_YESNO or MB_DEFBUTTON2, IDNO) <> IDYES then
-        RaiseException(FmtMessage(CustomMessage('RestoreFailed'),
-          [IntToStr(Code), ExpandConstant('{app}\setup.log')]));
+        RaiseException(FmtMessage(CustomMessage('RestoreFailed'), [IntToStr(Code),
+          ExpandConstant('{app}\setup.log')]));
       if ObsRunning then RaiseException(CustomMessage('ObsStillOpen'));
       KeepRecovery := True;
       // Missing/broken helper must not make removal impossible after consent.
