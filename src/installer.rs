@@ -383,21 +383,20 @@ fn install(p: &Paths, interactive: bool) -> Result<Config> {
     Ok(cfg)
 }
 
-fn uninstall(p: &Paths) -> Result<()> {
-    uninstall_inner(p, false)
-}
-
 fn uninstall_with_force(p: &Paths, force: bool) -> Result<()> {
-    if !force { return uninstall(p); }
-    // Never delete recovery evidence in forced mode, even after a successful retry.
-    if let Err(e) = uninstall_inner(p, true) {
-        step(&format!("WARNING: incomplete OBS recovery: {e:#}"));
+    // Force only tolerates a failure; successful recovery must consume its backups
+    // so a later install cannot reuse originals from the previous installation.
+    match uninstall(p) {
+        Err(e) if force => {
+            step(&format!("WARNING: incomplete OBS recovery: {e:#}"));
+            step("Forced removal allowed; remaining recovery files kept in OBS profiles and the application folder. Manual OBS recovery may be required.");
+            Ok(())
+        }
+        result => result,
     }
-    step("Forced removal allowed; recovery files kept in OBS profiles and the application folder. Manual OBS recovery may be required.");
-    Ok(())
 }
 
-fn uninstall_inner(p: &Paths, keep_recovery: bool) -> Result<()> {
+fn uninstall(p: &Paths) -> Result<()> {
     // Keep all recovery files until every restoration succeeds. A retry is idempotent.
     let mut cleanup = Vec::new();
     for c in p.scene_collections()? {
@@ -494,7 +493,7 @@ fn uninstall_inner(p: &Paths, keep_recovery: bool) -> Result<()> {
     for f in p.scene_collections()?.into_iter().chain([p.user_ini()]) {
         cleanup.push(backup_of(&f));
     }
-    for f in cleanup.into_iter().filter(|_| !keep_recovery) {
+    for f in cleanup {
         match std::fs::remove_file(&f) {
             Ok(()) => {},
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {},
@@ -1119,7 +1118,7 @@ mod tests {
     }
 
     #[test]
-    fn force_preserves_backups_even_when_restore_succeeds() {
+    fn forced_success_cleans_backups_and_reinstall_restores_current_service() {
         let root = std::env::temp_dir().join(format!("dd-force-success-{}", uuid()));
         let p = Paths { obs_dir: root.join("obs"), install_dir: root.join("relay") };
         let prof = p.obs_dir.join("basic/profiles/Main");
@@ -1129,9 +1128,19 @@ mod tests {
         std::fs::write(prof.join("basic.ini"), "[Output]\nDelayEnable=true\n").unwrap();
         install(&p, false).unwrap();
         uninstall_with_force(&p, true).unwrap();
-        assert!(prof.join("service.json.dd-backup").exists());
-        assert!(prof.join("basic.ini.dd-changes.json").exists());
+        assert!(!prof.join("service.json.dd-backup").exists());
+        assert!(!prof.join("basic.ini.dd-backup").exists());
+        assert!(!prof.join("basic.ini.dd-changes.json").exists());
         assert_eq!(read_json(&prof.join("service.json")).unwrap()["settings"]["key"], "original");
+        // A new install must capture YouTube, not resurrect Twitch's old backup.
+        let youtube = service_for(YOUTUBE_URL, "youtube-original");
+        write_json(&prof.join("service.json"), &youtube).unwrap();
+        std::fs::write(prof.join("basic.ini"), "[Output]\nDelayEnable=false\n").unwrap();
+        install(&p, false).unwrap();
+        uninstall(&p).unwrap();
+        assert_eq!(read_json(&prof.join("service.json")).unwrap(), youtube);
+        assert_eq!(ini_get(&std::fs::read_to_string(prof.join("basic.ini")).unwrap(),
+            "Output", "DelayEnable").as_deref(), Some("false"));
         std::fs::remove_dir_all(root).unwrap();
     }
 
