@@ -304,7 +304,7 @@ The relay checks GitHub for a new version when it starts, every 6 hours and when
 > [!WARNING]
 > **Do not use Geek Uninstaller, Revo, IObit or similar tools.** Use **Windows Settings > Apps > Dynamic Delay for OBS** (or Start menu > Dynamic Delay for OBS > Uninstall). Deleting the folder or using forced cleanup that skips the uninstaller can leave OBS pointing at missing files and a relay that no longer exists.
 >
-> If restoration fails, the interactive uninstaller offers **Uninstall anyway and keep the recovery files**. This may leave OBS pointing to the removed relay; restore its streaming service manually using the retained profile backups and application settings. Silent uninstall aborts by default. For the standalone helper, `--uninstall --quiet --force` permits incomplete recovery and keeps backups; it does not delete the program files or bypass the OBS-running check.
+> If restoration fails, the interactive uninstaller offers **Uninstall anyway and keep the recovery files**. This may leave OBS pointing to the removed relay; restore its streaming service manually using the retained profile backups and application settings. Silent uninstall aborts by default. For the standalone helper, `--uninstall --quiet --force` permits incomplete recovery and keeps backups when restoration fails; successful restoration cleans up recovery files as in a normal uninstall. It does not delete the program files or bypass the OBS-running check.
 
 If OBS is open, uninstall stops before removing the program. If restoration fails, it stops unless you explicitly choose to uninstall anyway. Close OBS and retry; `setup.log` in the install folder explains any restoration error. Keep the recovery files until the retry succeeds.
 
